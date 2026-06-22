@@ -8,7 +8,7 @@ import os
 
 # Importar funciones de reportes
 from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo, 
-                      generar_pdf_historial_conciliaciones, generar_pdf_conciliacion_detalle)
+                      generar_pdf_historial_conciliaciones, generar_pdf_detalle_conciliacion)
 
 st.set_page_config(page_title="Llanos del Sur", page_icon="🚛", layout="wide")
 
@@ -82,6 +82,8 @@ elif menu == "📥 Conciliación":
             resultado = ejecutar_conciliacion(f"temp_{archivo.name}")
         st.success(resultado["mensaje"])
         st.info(f"⏳ Pendientes: {resultado['total_pendientes_restantes']}")
+        if resultado.get("conciliacion_id"):
+            st.info(f"📌 Se ha creado un registro de conciliación con ID: {resultado['conciliacion_id']}")
         os.remove(f"temp_{archivo.name}")
 
 # ==========================================
@@ -270,7 +272,7 @@ elif menu == "📜 Pagos":
         st.info("📭 No hay pagos registrados aún.")
 
 # ==========================================
-# PÁGINA 5: REPORTES (con historial completo)
+# PÁGINA 5: REPORTES (NUEVA VERSIÓN CON HISTORIAL MEJORADO)
 # ==========================================
 else:
     st.title("📊 Reportes y Conciliaciones")
@@ -308,21 +310,22 @@ else:
                 session = SessionLocal()
                 conciliacion = session.query(Conciliacion).get(conciliacion_id)
                 pagos = conciliacion.pagos
-                df_detalle = pd.DataFrame([{
-                    "Cupo": p.cupo,
-                    "Monto": p.monto,
-                    "Referencia": p.referencia,
-                    "Fecha Reporte": p.fecha_reporte.strftime("%Y-%m-%d %H:%M")
-                } for p in pagos])
-                session.close()
-                if not df_detalle.empty:
-                    pdf_buffer = generar_pdf_conciliacion_detalle(conciliacion_id, df_detalle)
-                    st.download_button(
-                        label="📥 Descargar PDF",
-                        data=pdf_buffer,
-                        file_name=f"conciliacion_{conciliacion_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                        mime="application/pdf"
-                    )
+                if pagos:
+                    df_detalle = pd.DataFrame([{
+                        "Cupo": p.cupo,
+                        "Monto": p.monto,
+                        "Referencia": p.referencia,
+                        "Fecha Reporte": p.fecha_reporte.strftime("%Y-%m-%d %H:%M")
+                    } for p in pagos])
+                    session.close()
+                    if not df_detalle.empty:
+                        pdf_buffer = generar_pdf_detalle_conciliacion(conciliacion_id, df_detalle)
+                        st.download_button(
+                            label="📥 Descargar PDF",
+                            data=pdf_buffer,
+                            file_name=f"conciliacion_{conciliacion_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                            mime="application/pdf"
+                        )
                 else:
                     st.warning("Esta conciliación no tiene pagos asociados.")
         
@@ -331,21 +334,22 @@ else:
                 session = SessionLocal()
                 conciliacion = session.query(Conciliacion).get(conciliacion_id)
                 pagos = conciliacion.pagos
-                df_detalle = pd.DataFrame([{
-                    "Cupo": p.cupo,
-                    "Monto": p.monto,
-                    "Referencia": p.referencia,
-                    "Fecha Reporte": p.fecha_reporte.strftime("%Y-%m-%d %H:%M")
-                } for p in pagos])
-                session.close()
-                if not df_detalle.empty:
-                    csv_detalle = df_detalle.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-                    st.download_button(
-                        label="📥 Descargar CSV",
-                        data=csv_detalle,
-                        file_name=f"conciliacion_{conciliacion_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
-                    )
+                if pagos:
+                    df_detalle = pd.DataFrame([{
+                        "Cupo": p.cupo,
+                        "Monto": p.monto,
+                        "Referencia": p.referencia,
+                        "Fecha Reporte": p.fecha_reporte.strftime("%Y-%m-%d %H:%M")
+                    } for p in pagos])
+                    session.close()
+                    if not df_detalle.empty:
+                        csv_detalle = df_detalle.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                        st.download_button(
+                            label="📥 Descargar CSV",
+                            data=csv_detalle,
+                            file_name=f"conciliacion_{conciliacion_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv"
+                        )
                 else:
                     st.warning("Esta conciliación no tiene pagos asociados.")
         
