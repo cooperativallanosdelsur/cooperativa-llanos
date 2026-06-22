@@ -6,7 +6,7 @@ from database import SessionLocal, Pago, Socio, Conciliacion, conciliacion_pago
 from conciliador import ejecutar_conciliacion
 import os
 
-# Importar todas las funciones de reportes
+# IMPORTACIÓN CORREGIDA: nombre del archivo es 'reportes' (sin 's' al final)
 from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo, 
                       generar_pdf_historial_conciliaciones, generar_pdf_detalle_conciliacion,
                       generar_pdf_historial_pagos)
@@ -154,7 +154,7 @@ elif menu == "👥 Socios":
         st.info("📭 No hay socios registrados aún.")
 
 # ==========================================
-# PÁGINA 4: PAGOS (con nuevo botón PDF)
+# PÁGINA 4: PAGOS (con PDF)
 # ==========================================
 elif menu == "📜 Pagos":
     st.title("📜 Historial de Pagos")
@@ -287,7 +287,7 @@ elif menu == "📜 Pagos":
         st.info("📭 No hay pagos registrados aún.")
 
 # ==========================================
-# PÁGINA 5: REPORTES (con historial mejorado)
+# PÁGINA 5: REPORTES
 # ==========================================
 else:
     st.title("📊 Reportes y Conciliaciones")
