@@ -6,7 +6,7 @@ from database import SessionLocal, Pago, Socio, Conciliacion, conciliacion_pago
 from conciliador import ejecutar_conciliacion
 import os
 
-# Importar funciones de reportes
+# Importar funciones de reportes (nombre correcto del archivo: reportes.py)
 from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo, 
                       generar_pdf_historial_conciliaciones, generar_pdf_detalle_conciliacion)
 
@@ -82,8 +82,6 @@ elif menu == "📥 Conciliación":
             resultado = ejecutar_conciliacion(f"temp_{archivo.name}")
         st.success(resultado["mensaje"])
         st.info(f"⏳ Pendientes: {resultado['total_pendientes_restantes']}")
-        if resultado.get("conciliacion_id"):
-            st.info(f"📌 Se ha creado un registro de conciliación con ID: {resultado['conciliacion_id']}")
         os.remove(f"temp_{archivo.name}")
 
 # ==========================================
@@ -272,7 +270,7 @@ elif menu == "📜 Pagos":
         st.info("📭 No hay pagos registrados aún.")
 
 # ==========================================
-# PÁGINA 5: REPORTES (NUEVA VERSIÓN CON HISTORIAL MEJORADO)
+# PÁGINA 5: REPORTES (con historial mejorado)
 # ==========================================
 else:
     st.title("📊 Reportes y Conciliaciones")
@@ -395,7 +393,7 @@ else:
     
     st.divider()
     
-    # --- SECCIÓN 2: REPORTE DE SOCIOS (sin cambios) ---
+    # --- SECCIÓN 2: REPORTE DE SOCIOS ---
     st.header("📄 Reporte de Socios - Estado de Pagos")
     
     session = SessionLocal()
