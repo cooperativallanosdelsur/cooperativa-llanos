@@ -24,6 +24,6 @@ class Pago(Base):
     fecha_conciliacion = Column(DateTime, nullable=True)
     estatus = Column(String(20), default='Pendiente')
 
-if __name__ == "__main__":
-    Base.metadata.create_all(engine)
-    print("✅ Base de datos creada con éxito!")
+# ⚠️ IMPORTANTE: Esta línea SIEMPRE se ejecutará al iniciar la app,
+# asegurando que las tablas existan en la nube.
+Base.metadata.create_all(engine)
