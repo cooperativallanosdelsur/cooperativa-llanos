@@ -1,3 +1,4 @@
+# ========== INICIO DEL ARCHIVO ==========
 import pandas as pd
 from database import SessionLocal, Pago, Conciliacion, conciliacion_pago
 from datetime import datetime
@@ -39,8 +40,7 @@ def ejecutar_conciliacion(ruta_archivo_bancos):
             monto_total=sum(p.monto for p in pagos_conciliados)
         )
         session.add(nueva_conciliacion)
-        # Forzar flush para obtener el ID de la conciliación
-        session.flush()
+        session.flush()  # Para obtener el ID de la conciliación
         
         # Asociar los pagos conciliados con esta conciliación
         for pago in pagos_conciliados:
@@ -60,3 +60,4 @@ def ejecutar_conciliacion(ruta_archivo_bancos):
         "mensaje": f"✅ {conciliados_hoy} pagos conciliados automáticamente.",
         "total_pendientes_restantes": restantes
     }
+# ========== FIN DEL ARCHIVO ==========
