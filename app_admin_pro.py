@@ -2,13 +2,9 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-from database import SessionLocal, Pago, Socio, engine
-from database import Base
+from database import SessionLocal, Pago, Socio
 from conciliador import ejecutar_conciliacion
 import os
-
-# Crear las tablas de la base de datos si no existen (SOLUCIONA EL ERROR EN LA NUBE)
-Base.metadata.create_all(engine)
 
 st.set_page_config(page_title="Llanos del Sur", page_icon="🚛", layout="wide")
 
@@ -92,8 +88,35 @@ elif menu == "👥 Socios":
     st.dataframe(socios_df[['cupo', 'nombre', 'telefono']], use_container_width=True)
 
 else:
-    st.title("📜 Historial")
-    filtro = st.selectbox("Filtrar", ["Todos", "Pendiente", "Conciliado"])
+    st.title("📜 Historial de Pagos")
+    
+    # --- FORMULARIO PARA AGREGAR PAGO DE PRUEBA ---
+    with st.expander("➕ Agregar Pago de Prueba (Solo para testing)"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            cupo_pago = st.text_input("Cupo del socio", "C-001")
+        with col2:
+            monto_pago = st.number_input("Monto", value=250.00, step=10.0)
+        with col3:
+            ref_pago = st.text_input("Referencia (4 dígitos)", "1234")
+        
+        if st.button("Registrar Pago de Prueba"):
+            if cupo_pago and monto_pago and ref_pago:
+                session = SessionLocal()
+                nuevo_pago = Pago(
+                    cupo=cupo_pago,
+                    monto=monto_pago,
+                    referencia=ref_pago,
+                    estatus='Pendiente'
+                )
+                session.add(nuevo_pago)
+                session.commit()
+                session.close()
+                st.success(f"✅ Pago de {cupo_pago} registrado con éxito!")
+                st.rerun()
+    # --- FIN FORMULARIO ---
+
+    filtro = st.selectbox("Filtrar por estatus", ["Todos", "Pendiente", "Conciliado"])
     df_filtrado = pagos_df.copy()
     if filtro != "Todos":
         df_filtrado = df_filtrado[df_filtrado['estatus'] == filtro]
