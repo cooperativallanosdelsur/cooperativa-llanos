@@ -2,12 +2,13 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-from database import SessionLocal, Pago, Socio
+from database import SessionLocal, Pago, Socio, Conciliacion, conciliacion_pago
 from conciliador import ejecutar_conciliacion
 import os
 
-# Importar funciones de reportes (incluyendo la nueva para historial)
-from reportes import generar_pdf_reporte_socios, generar_pdf_recibo, generar_pdf_historial_conciliaciones
+# Importar funciones de reportes
+from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo, 
+                      generar_pdf_historial_conciliaciones, generar_pdf_conciliacion_detalle)
 
 st.set_page_config(page_title="Llanos del Sur", page_icon="🚛", layout="wide")
 
@@ -89,7 +90,6 @@ elif menu == "📥 Conciliación":
 elif menu == "👥 Socios":
     st.title("👥 Transportistas")
     
-    # --- FORMULARIO PARA AGREGAR ---
     with st.form("form_socio"):
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -117,7 +117,6 @@ elif menu == "👥 Socios":
     st.divider()
     st.subheader("📋 Lista de Socios Actuales")
     
-    # --- MOSTRAR TABLA ---
     session = SessionLocal()
     socios_db = session.query(Socio).all()
     session.close()
@@ -130,7 +129,6 @@ elif menu == "👥 Socios":
         } for s in socios_db])
         st.dataframe(df_socios, use_container_width=True)
         
-        # --- ELIMINAR SOCIO ---
         st.divider()
         st.subheader("🗑️ Eliminar Socio")
         lista_cupos = [s.cupo for s in socios_db]
@@ -160,7 +158,6 @@ elif menu == "👥 Socios":
 elif menu == "📜 Pagos":
     st.title("📜 Historial de Pagos")
     
-    # --- FORMULARIO PARA AGREGAR PAGO DE PRUEBA ---
     with st.expander("➕ Agregar Pago de Prueba (Solo para testing)"):
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -186,19 +183,15 @@ elif menu == "📜 Pagos":
     
     st.divider()
     
-    # --- FILTROS Y TABLA ---
     col_filtro, col_archivo, col_borrar = st.columns([2, 1, 1])
     with col_filtro:
         filtro = st.selectbox("Filtrar por estatus", ["Todos", "Pendiente", "Conciliado"])
     
-    # Recargar datos
     session = SessionLocal()
     pagos_db = session.query(Pago).all()
-    socios_db = session.query(Socio).all()
     session.close()
     
     if pagos_db:
-        # Crear DataFrame con información de socios
         df_pagos = pd.DataFrame([{
             "ID": p.id,
             "Cupo": p.cupo,
@@ -209,7 +202,6 @@ elif menu == "📜 Pagos":
             "Fecha Conciliación": p.fecha_conciliacion.strftime("%Y-%m-%d %H:%M") if p.fecha_conciliacion else "N/A"
         } for p in pagos_db])
         
-        # Aplicar filtro
         if filtro != "Todos":
             df_filtrado = df_pagos[df_pagos['Estatus'] == filtro]
         else:
@@ -217,7 +209,7 @@ elif menu == "📜 Pagos":
         
         st.dataframe(df_filtrado, use_container_width=True)
         
-        # --- BOTÓN ENVIAR RECIBO (con vista previa y PDF) ---
+        # --- BOTÓN ENVIAR RECIBO ---
         st.subheader("📨 Enviar Recibo de Pago")
         conciliados = df_pagos[df_pagos['Estatus'] == 'Conciliado']
         if not conciliados.empty:
@@ -225,7 +217,6 @@ elif menu == "📜 Pagos":
             seleccion = st.selectbox("Selecciona el pago para enviar recibo:", list(opciones.keys()))
             pago_id = opciones[seleccion]
             
-            # Obtener datos del pago y socio
             session = SessionLocal()
             pago = session.query(Pago).get(pago_id)
             socio = session.query(Socio).filter(Socio.cupo == pago.cupo).first()
@@ -244,13 +235,11 @@ elif menu == "📜 Pagos":
                         )
                 with col2:
                     if st.button("📨 Enviar por WhatsApp (simulado)"):
-                        # Aquí se integraría la API de Twilio
                         st.success(f"✅ Recibo enviado exitosamente al socio {socio.nombre} (simulación).")
                         st.info("En producción se enviará el PDF por WhatsApp usando Twilio.")
         else:
             st.info("No hay pagos conciliados para enviar recibos.")
         
-        # --- COLUMNA PARA ARCHIVAR (Descargar CSV) ---
         with col_archivo:
             st.write("")
             st.write("")
@@ -263,7 +252,6 @@ elif menu == "📜 Pagos":
                 use_container_width=True
             )
         
-        # --- COLUMNA PARA BORRAR TODOS LOS PAGOS ---
         with col_borrar:
             st.write("")
             st.write("")
@@ -282,7 +270,7 @@ elif menu == "📜 Pagos":
         st.info("📭 No hay pagos registrados aún.")
 
 # ==========================================
-# PÁGINA 5: REPORTES (con PDF en historial)
+# PÁGINA 5: REPORTES (NUEVA VERSIÓN CON HISTORIAL MEJORADO)
 # ==========================================
 else:
     st.title("📊 Reportes y Conciliaciones")
@@ -291,38 +279,107 @@ else:
     st.header("📋 Historial de Conciliaciones")
     
     session = SessionLocal()
-    pagos_conc = session.query(Pago).filter(Pago.fecha_conciliacion.isnot(None)).all()
+    conciliaciones = session.query(Conciliacion).order_by(Conciliacion.fecha_hora.desc()).all()
     session.close()
     
-    if pagos_conc:
-        df_hist = pd.DataFrame([{
-            "Fecha": p.fecha_conciliacion.strftime("%Y-%m-%d %H:%M"),
-            "Cupo": p.cupo,
-            "Monto": p.monto,
-            "Referencia": p.referencia
-        } for p in pagos_conc])
+    if conciliaciones:
+        # Mostrar tabla con las conciliaciones
+        data = []
+        for c in conciliaciones:
+            data.append({
+                "ID": c.id,
+                "Fecha/Hora": c.fecha_hora.strftime("%Y-%m-%d %H:%M"),
+                "Total Pagos": c.total_pagos,
+                "Monto Total": c.monto_total,
+                "Conciliado con el banco": "✅ Sí" if c.total_pagos > 0 else "❌ No"
+            })
+        df_conciliaciones = pd.DataFrame(data)
+        st.dataframe(df_conciliaciones, use_container_width=True)
         
-        # Resumen por fecha
-        resumen = df_hist.groupby("Fecha").agg(
-            Total_Pagos=("Cupo", "count"),
-            Monto_Total=("Monto", "sum")
-        ).reset_index()
+        # Opciones para cada conciliación: exportar detalle y eliminar
+        st.subheader("📌 Acciones por Conciliación")
+        opciones = {f"{row['Fecha/Hora']} - {row['Total Pagos']} pagos - ${row['Monto Total']:,.2f}": row['ID'] for _, row in df_conciliaciones.iterrows()}
+        seleccion = st.selectbox("Selecciona una conciliación para gestionar:", list(opciones.keys()))
+        conciliacion_id = opciones[seleccion]
         
-        st.dataframe(resumen, use_container_width=True)
-        
-        # Botones de descarga: CSV y PDF
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            csv_hist = df_hist.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            if st.button("📄 Exportar Detalle (PDF)"):
+                session = SessionLocal()
+                conciliacion = session.query(Conciliacion).get(conciliacion_id)
+                pagos = conciliacion.pagos
+                df_detalle = pd.DataFrame([{
+                    "Cupo": p.cupo,
+                    "Monto": p.monto,
+                    "Referencia": p.referencia,
+                    "Fecha Reporte": p.fecha_reporte.strftime("%Y-%m-%d %H:%M")
+                } for p in pagos])
+                session.close()
+                if not df_detalle.empty:
+                    pdf_buffer = generar_pdf_conciliacion_detalle(conciliacion_id, df_detalle)
+                    st.download_button(
+                        label="📥 Descargar PDF",
+                        data=pdf_buffer,
+                        file_name=f"conciliacion_{conciliacion_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                        mime="application/pdf"
+                    )
+                else:
+                    st.warning("Esta conciliación no tiene pagos asociados.")
+        
+        with col2:
+            if st.button("📄 Exportar Detalle (CSV)"):
+                session = SessionLocal()
+                conciliacion = session.query(Conciliacion).get(conciliacion_id)
+                pagos = conciliacion.pagos
+                df_detalle = pd.DataFrame([{
+                    "Cupo": p.cupo,
+                    "Monto": p.monto,
+                    "Referencia": p.referencia,
+                    "Fecha Reporte": p.fecha_reporte.strftime("%Y-%m-%d %H:%M")
+                } for p in pagos])
+                session.close()
+                if not df_detalle.empty:
+                    csv_detalle = df_detalle.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                    st.download_button(
+                        label="📥 Descargar CSV",
+                        data=csv_detalle,
+                        file_name=f"conciliacion_{conciliacion_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.warning("Esta conciliación no tiene pagos asociados.")
+        
+        with col3:
+            confirmar = st.checkbox("⚠️ Marcar para eliminar esta conciliación")
+            if st.button("🗑️ Eliminar Conciliación", type="primary"):
+                if confirmar:
+                    session = SessionLocal()
+                    conciliacion = session.query(Conciliacion).get(conciliacion_id)
+                    if conciliacion:
+                        # Eliminar las relaciones en la tabla intermedia
+                        session.execute(conciliacion_pago.delete().where(conciliacion_pago.c.conciliacion_id == conciliacion_id))
+                        session.delete(conciliacion)
+                        session.commit()
+                        st.success(f"✅ Conciliación #{conciliacion_id} eliminada.")
+                        st.rerun()
+                    session.close()
+                else:
+                    st.error("❌ Debes marcar la casilla de confirmación.")
+        
+        # Botón para descargar el historial completo (resumen)
+        st.divider()
+        col_csv, col_pdf = st.columns(2)
+        with col_csv:
+            csv_hist = df_conciliaciones.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
             st.download_button(
-                label="📥 Descargar Historial en CSV",
+                label="📥 Descargar Historial Completo (CSV)",
                 data=csv_hist,
                 file_name=f"historial_conciliaciones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
             )
-        with col2:
-            if st.button("📄 Generar Historial en PDF"):
-                pdf_buffer = generar_pdf_historial_conciliaciones(df_hist)
+        with col_pdf:
+            if st.button("📄 Generar Historial Completo (PDF)"):
+                pdf_buffer = generar_pdf_historial_conciliaciones(df_conciliaciones)
                 st.download_button(
                     label="📥 Descargar PDF",
                     data=pdf_buffer,
@@ -334,7 +391,7 @@ else:
     
     st.divider()
     
-    # --- SECCIÓN 2: REPORTE DE SOCIOS ---
+    # --- SECCIÓN 2: REPORTE DE SOCIOS (sin cambios) ---
     st.header("📄 Reporte de Socios - Estado de Pagos")
     
     session = SessionLocal()
@@ -361,7 +418,6 @@ else:
         df_reporte = pd.DataFrame(reporte)
         st.dataframe(df_reporte, use_container_width=True)
         
-        # Botones de descarga: CSV y PDF
         col1, col2 = st.columns(2)
         with col1:
             csv_reporte = df_reporte.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
