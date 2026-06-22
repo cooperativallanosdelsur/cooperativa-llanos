@@ -1,11 +1,19 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Table
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 
 Base = declarative_base()
 engine = create_engine('sqlite:///cooperativa.db', echo=False)
 SessionLocal = sessionmaker(bind=engine)
+
+# Tabla intermedia para la relación muchos a muchos entre Conciliacion y Pago
+conciliacion_pago = Table(
+    'conciliacion_pago',
+    Base.metadata,
+    Column('conciliacion_id', Integer, ForeignKey('conciliaciones.id')),
+    Column('pago_id', Integer, ForeignKey('pagos.id'))
+)
 
 class Socio(Base):
     __tablename__ = 'socios'
@@ -24,6 +32,14 @@ class Pago(Base):
     fecha_conciliacion = Column(DateTime, nullable=True)
     estatus = Column(String(20), default='Pendiente')
 
-# ⚠️ IMPORTANTE: Esta línea SIEMPRE se ejecutará al iniciar la app,
-# asegurando que las tablas existan en la nube.
+class Conciliacion(Base):
+    __tablename__ = 'conciliaciones'
+    id = Column(Integer, primary_key=True)
+    fecha_hora = Column(DateTime, default=datetime.now)
+    total_pagos = Column(Integer, default=0)
+    monto_total = Column(Float, default=0.0)
+    # Relación con los pagos conciliados en este evento
+    pagos = relationship("Pago", secondary=conciliacion_pago, backref="conciliacion")
+
+# Crear todas las tablas (esto se ejecutará al iniciar la app)
 Base.metadata.create_all(engine)
