@@ -6,9 +6,10 @@ from database import SessionLocal, Pago, Socio, Conciliacion, conciliacion_pago
 from conciliador import ejecutar_conciliacion
 import os
 
-# Importar funciones de reportes (nombre correcto del archivo: reportes.py)
+# Importar todas las funciones de reportes
 from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo, 
-                      generar_pdf_historial_conciliaciones, generar_pdf_detalle_conciliacion)
+                      generar_pdf_historial_conciliaciones, generar_pdf_detalle_conciliacion,
+                      generar_pdf_historial_pagos)
 
 st.set_page_config(page_title="Llanos del Sur", page_icon="🚛", layout="wide")
 
@@ -85,7 +86,7 @@ elif menu == "📥 Conciliación":
         os.remove(f"temp_{archivo.name}")
 
 # ==========================================
-# PÁGINA 3: SOCIOS (con eliminar)
+# PÁGINA 3: SOCIOS
 # ==========================================
 elif menu == "👥 Socios":
     st.title("👥 Transportistas")
@@ -153,7 +154,7 @@ elif menu == "👥 Socios":
         st.info("📭 No hay socios registrados aún.")
 
 # ==========================================
-# PÁGINA 4: PAGOS (con envío de recibo)
+# PÁGINA 4: PAGOS (con nuevo botón PDF)
 # ==========================================
 elif menu == "📜 Pagos":
     st.title("📜 Historial de Pagos")
@@ -183,7 +184,7 @@ elif menu == "📜 Pagos":
     
     st.divider()
     
-    col_filtro, col_archivo, col_borrar = st.columns([2, 1, 1])
+    col_filtro, col_acciones, col_borrar = st.columns([2, 1, 1])
     with col_filtro:
         filtro = st.selectbox("Filtrar por estatus", ["Todos", "Pendiente", "Conciliado"])
     
@@ -240,18 +241,34 @@ elif menu == "📜 Pagos":
         else:
             st.info("No hay pagos conciliados para enviar recibos.")
         
-        with col_archivo:
+        # --- COLUMNA PARA ARCHIVAR (CSV y PDF) ---
+        with col_acciones:
             st.write("")
             st.write("")
+            # Descarga CSV
             csv_completo = df_pagos.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
             st.download_button(
-                label="📥 Descargar Historial",
+                label="📥 Descargar CSV",
                 data=csv_completo,
                 file_name=f"historial_pagos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv",
                 use_container_width=True
             )
+            
+            # Generación de PDF (con botón para no relentizar)
+            if st.button("📄 Generar Historial PDF", key="gen_pdf_pagos"):
+                st.session_state['pdf_pagos_data'] = generar_pdf_historial_pagos(df_pagos)
+            
+            if 'pdf_pagos_data' in st.session_state:
+                st.download_button(
+                    label="📥 Descargar PDF",
+                    data=st.session_state['pdf_pagos_data'],
+                    file_name=f"historial_pagos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
         
+        # --- COLUMNA PARA BORRAR TODOS LOS PAGOS ---
         with col_borrar:
             st.write("")
             st.write("")
