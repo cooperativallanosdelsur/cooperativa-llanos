@@ -143,7 +143,7 @@ def generar_pdf_historial_conciliaciones(df_historial):
     buffer.seek(0)
     return buffer
 
-def generar_pdf_conciliacion_detalle(conciliacion_id, pagos_detalle):
+def generar_pdf_detalle_conciliacion(conciliacion_id, pagos_detalle):
     """Genera un PDF con el detalle de una conciliación específica."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
