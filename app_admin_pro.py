@@ -270,7 +270,7 @@ elif menu == "📜 Pagos":
         st.info("📭 No hay pagos registrados aún.")
 
 # ==========================================
-# PÁGINA 5: REPORTES (NUEVA VERSIÓN CON HISTORIAL MEJORADO)
+# PÁGINA 5: REPORTES (con historial completo)
 # ==========================================
 else:
     st.title("📊 Reportes y Conciliaciones")
