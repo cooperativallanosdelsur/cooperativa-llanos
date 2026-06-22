@@ -8,6 +8,7 @@ import os
 
 st.set_page_config(page_title="Llanos del Sur", page_icon="🚛", layout="wide")
 
+# --- AUTENTICACIÓN ---
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
@@ -23,9 +24,11 @@ if not st.session_state.authenticated:
             st.sidebar.error("Credenciales incorrectas")
     st.stop()
 
+# --- MENÚ LATERAL ---
 st.sidebar.title("🚚 Menú")
 menu = st.sidebar.radio("Navegación", ["📊 Dashboard", "📥 Conciliación", "👥 Socios", "📜 Pagos"])
 
+# --- CARGA DE DATOS ---
 @st.cache_data(ttl=60)
 def load_data():
     session = SessionLocal()
@@ -36,6 +39,9 @@ def load_data():
 
 socios_df, pagos_df = load_data()
 
+# ==========================================
+# PÁGINA 1: DASHBOARD
+# ==========================================
 if menu == "📊 Dashboard":
     st.title("📊 Panel de Control")
     col1, col2, col3, col4 = st.columns(4)
@@ -43,21 +49,28 @@ if menu == "📊 Dashboard":
     conc = len(pagos_df[pagos_df['estatus'] == 'Conciliado'])
     pend = len(pagos_df[pagos_df['estatus'] == 'Pendiente'])
     monto_total = pagos_df['monto'].sum() if not pagos_df.empty else 0
+    
     col1.metric("💰 Total Pagos", total)
     col2.metric("✅ Conciliados", conc, delta=f"{round(conc/total*100 if total>0 else 0, 1)}%")
     col3.metric("⏳ Pendientes", pend)
     col4.metric("💵 Monto Total", f"${monto_total:,.2f}")
+    
     if not pagos_df.empty:
         pagos_df['fecha'] = pd.to_datetime(pagos_df['fecha_reporte']).dt.date
         daily = pagos_df.groupby('fecha').size().reset_index(name='cantidad')
         fig = px.bar(daily, x='fecha', y='cantidad', title="📈 Pagos por Día")
         st.plotly_chart(fig, use_container_width=True)
+        
         st.subheader("📋 Últimos pagos")
         st.dataframe(pagos_df.sort_values('fecha_reporte', ascending=False).head(10)[['cupo', 'monto', 'referencia', 'estatus']])
 
+# ==========================================
+# PÁGINA 2: CONCILIACIÓN
+# ==========================================
 elif menu == "📥 Conciliación":
     st.title("📥 Subir Estado de Cuenta")
     archivo = st.file_uploader("Carga tu archivo .CSV o .XLSX", type=['csv', 'xlsx'])
+    
     if archivo is not None and st.button("🚀 Ejecutar Conciliación"):
         with open(f"temp_{archivo.name}", "wb") as f:
             f.write(archivo.getbuffer())
@@ -67,8 +80,13 @@ elif menu == "📥 Conciliación":
         st.info(f"⏳ Pendientes: {resultado['total_pendientes_restantes']}")
         os.remove(f"temp_{archivo.name}")
 
+# ==========================================
+# PÁGINA 3: SOCIOS (CON ELIMINAR)
+# ==========================================
 elif menu == "👥 Socios":
     st.title("👥 Transportistas")
+    
+    # --- FORMULARIO PARA AGREGAR ---
     with st.form("form_socio"):
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -77,16 +95,69 @@ elif menu == "👥 Socios":
             nombre = st.text_input("Nombre completo")
         with col3:
             telefono = st.text_input("WhatsApp")
+        
         if st.form_submit_button("➕ Registrar Socio"):
             if cupo and nombre:
                 session = SessionLocal()
-                session.add(Socio(cupo=cupo, nombre=nombre, telefono=telefono))
-                session.commit()
+                existe = session.query(Socio).filter(Socio.cupo == cupo).first()
+                if existe:
+                    st.warning(f"⚠️ El cupo {cupo} ya está registrado.")
+                else:
+                    session.add(Socio(cupo=cupo, nombre=nombre, telefono=telefono))
+                    session.commit()
+                    st.success(f"✅ Socio {nombre} registrado con éxito!")
+                    session.close()
+                    st.rerun()
                 session.close()
-                st.success("✅ Registrado")
-                st.rerun()
-    st.dataframe(socios_df[['cupo', 'nombre', 'telefono']], use_container_width=True)
+            else:
+                st.error("Cupo y nombre son obligatorios.")
+    
+    st.divider()
+    st.subheader("📋 Lista de Socios Actuales")
+    
+    # --- MOSTRAR TABLA ---
+    session = SessionLocal()
+    socios_db = session.query(Socio).all()
+    session.close()
+    
+    if socios_db:
+        df_socios = pd.DataFrame([{
+            "Cupo": s.cupo, 
+            "Nombre": s.nombre, 
+            "Teléfono": s.telefono
+        } for s in socios_db])
+        
+        st.dataframe(df_socios, use_container_width=True)
+        
+        # --- ELIMINAR SOCIO ---
+        st.divider()
+        st.subheader("🗑️ Eliminar Socio")
+        
+        lista_cupos = [s.cupo for s in socios_db]
+        cupo_a_eliminar = st.selectbox("Selecciona el Cupo del socio que deseas eliminar:", lista_cupos)
+        
+        if st.button("🗑️ Eliminar Socio Seleccionado", type="primary"):
+            session = SessionLocal()
+            socio = session.query(Socio).filter(Socio.cupo == cupo_a_eliminar).first()
+            if socio:
+                pagos_asociados = session.query(Pago).filter(Pago.cupo == cupo_a_eliminar).count()
+                if pagos_asociados > 0:
+                    st.warning(f"⚠️ Este socio tiene {pagos_asociados} pagos registrados. No se puede eliminar hasta que elimines los pagos o los concilies.")
+                else:
+                    session.delete(socio)
+                    session.commit()
+                    st.success(f"✅ Socio {cupo_a_eliminar} eliminado correctamente.")
+                    session.close()
+                    st.rerun()
+                session.close()
+            else:
+                st.error("Socio no encontrado.")
+    else:
+        st.info("📭 No hay socios registrados aún. ¡Agrega uno arriba!")
 
+# ==========================================
+# PÁGINA 4: PAGOS (CON PRUEBAS MANUALES)
+# ==========================================
 else:
     st.title("📜 Historial de Pagos")
     
@@ -113,11 +184,13 @@ else:
                 session.commit()
                 session.close()
                 st.success(f"✅ Pago de {cupo_pago} registrado con éxito!")
-                st.rerun()
-    # --- FIN FORMULARIO ---
-
+                st.rerun()   # <--- CORREGIDO (era st.return)
+    
+    # --- FILTRO Y TABLA DE PAGOS ---
     filtro = st.selectbox("Filtrar por estatus", ["Todos", "Pendiente", "Conciliado"])
     df_filtrado = pagos_df.copy()
     if filtro != "Todos":
         df_filtrado = df_filtrado[df_filtrado['estatus'] == filtro]
+    
+    # <--- CORREGIDO (era 'monito', ahora es 'monto')
     st.dataframe(df_filtrado[['cupo', 'monto', 'referencia', 'estatus']], use_container_width=True)
