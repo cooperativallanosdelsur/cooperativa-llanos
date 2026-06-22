@@ -75,7 +75,6 @@ def generar_pdf_recibo(pago, socio):
     contenido.append(Paragraph(f"<b>Teléfono:</b> {socio.telefono}", estilo_normal))
     contenido.append(Spacer(1, 0.5*cm))
     
-    # CORREGIDO: un solo colon en el formato y FONTSIZE en lugar de FONTSTYLE
     data = [
         ["Concepto", "Referencia", "Monto"],
         [f"Pago de cuota", pago.referencia, f"${pago.monto:.2f}"]
@@ -86,7 +85,7 @@ def generar_pdf_recibo(pago, socio):
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-        ('FONTSIZE', (0,0), (-1,-1), 10),   # CORREGIDO
+        ('FONTSIZE', (0,0), (-1,-1), 10),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
     ]))
     contenido.append(tabla)
@@ -94,8 +93,54 @@ def generar_pdf_recibo(pago, socio):
     contenido.append(Paragraph("Este comprobante certifica que el pago ha sido conciliado con el banco.", estilo_normal))
     contenido.append(Paragraph("¡Gracias por su puntualidad!", estilo_normal))
     contenido.append(Spacer(1, 2*cm))
-    contenido.append(Paragraph("_______________________", estilo_centro))  # Línea de firma
+    contenido.append(Paragraph("_______________________", estilo_centro))
     contenido.append(Paragraph("Firma autorizada", estilo_centro))
+    
+    doc.build(contenido)
+    buffer.seek(0)
+    return buffer
+
+# ========== NUEVA FUNCIÓN PARA HISTORIAL DE CONCILIACIONES ==========
+def generar_pdf_historial_conciliaciones(df_historial):
+    """Genera un PDF con el historial de conciliaciones en formato tabla."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+    styles = getSampleStyleSheet()
+    estilo_titulo = styles['Title']
+    estilo_normal = styles['Normal']
+    
+    contenido = []
+    contenido.append(Paragraph("HISTORIAL DE CONCILIACIONES", estilo_titulo))
+    contenido.append(Spacer(1, 0.5*cm))
+    contenido.append(Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}", estilo_normal))
+    contenido.append(Spacer(1, 1*cm))
+    
+    # Preparar datos para la tabla
+    data = [["Fecha", "Cupo", "Monto", "Referencia"]]
+    for _, row in df_historial.iterrows():
+        data.append([
+            row['Fecha'],
+            row['Cupo'],
+            f"${row['Monto']:,.2f}",
+            row['Referencia']
+        ])
+    
+    tabla = Table(data, colWidths=[4*cm, 3*cm, 3*cm, 4*cm])
+    tabla.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.darkblue),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,0), 10),
+        ('BOTTOMPADDING', (0,0), (-1,0), 6),
+        ('BACKGROUND', (0,1), (-1,-1), colors.beige),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ('FONTSIZE', (0,1), (-1,-1), 9),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ]))
+    contenido.append(tabla)
+    contenido.append(Spacer(1, 2*cm))
+    contenido.append(Paragraph("Cooperativa Mensajeros Llanos del Sur, R.L.", styles['Normal']))
     
     doc.build(contenido)
     buffer.seek(0)
