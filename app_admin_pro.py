@@ -2,9 +2,13 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-from database import SessionLocal, Pago, Socio
+from database import SessionLocal, Pago, Socio, engine
+from database import Base
 from conciliador import ejecutar_conciliacion
 import os
+
+# Crear las tablas de la base de datos si no existen (SOLUCIONA EL ERROR EN LA NUBE)
+Base.metadata.create_all(engine)
 
 st.set_page_config(page_title="Llanos del Sur", page_icon="🚛", layout="wide")
 
