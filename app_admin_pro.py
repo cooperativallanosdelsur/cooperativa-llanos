@@ -6,8 +6,8 @@ from database import SessionLocal, Pago, Socio
 from conciliador import ejecutar_conciliacion
 import os
 
-# Importar funciones de reportes desde el archivo separado
-from reportes import generar_pdf_reporte_socios, generar_pdf_recibo
+# Importar funciones de reportes (incluyendo la nueva para historial)
+from reportes import generar_pdf_reporte_socios, generar_pdf_recibo, generar_pdf_historial_conciliaciones
 
 st.set_page_config(page_title="Llanos del Sur", page_icon="🚛", layout="wide")
 
@@ -282,7 +282,7 @@ elif menu == "📜 Pagos":
         st.info("📭 No hay pagos registrados aún.")
 
 # ==========================================
-# PÁGINA 5: REPORTES
+# PÁGINA 5: REPORTES (con PDF en historial)
 # ==========================================
 else:
     st.title("📊 Reportes y Conciliaciones")
@@ -310,14 +310,25 @@ else:
         
         st.dataframe(resumen, use_container_width=True)
         
-        # Descargar CSV (con codificación corregida)
-        csv_hist = df_hist.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-        st.download_button(
-            label="📥 Descargar Historial de Conciliaciones (CSV)",
-            data=csv_hist,
-            file_name=f"historial_conciliaciones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
+        # Botones de descarga: CSV y PDF
+        col1, col2 = st.columns(2)
+        with col1:
+            csv_hist = df_hist.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            st.download_button(
+                label="📥 Descargar Historial en CSV",
+                data=csv_hist,
+                file_name=f"historial_conciliaciones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+        with col2:
+            if st.button("📄 Generar Historial en PDF"):
+                pdf_buffer = generar_pdf_historial_conciliaciones(df_hist)
+                st.download_button(
+                    label="📥 Descargar PDF",
+                    data=pdf_buffer,
+                    file_name=f"historial_conciliaciones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    mime="application/pdf"
+                )
     else:
         st.info("Aún no se ha realizado ninguna conciliación.")
     
