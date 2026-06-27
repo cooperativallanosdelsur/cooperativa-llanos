@@ -6,7 +6,7 @@ from database import SessionLocal, Pago, Socio, Conciliacion, conciliacion_pago
 from conciliador import ejecutar_conciliacion
 import os
 
-# IMPORTACIÓN CORREGIDA: nombre del archivo es 'reportes' (sin 's' al final)
+# Importación de reportes
 from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo, 
                       generar_pdf_historial_conciliaciones, generar_pdf_detalle_conciliacion,
                       generar_pdf_historial_pagos)
@@ -154,11 +154,12 @@ elif menu == "👥 Socios":
         st.info("📭 No hay socios registrados aún.")
 
 # ==========================================
-# PÁGINA 4: PAGOS (con PDF)
+# PÁGINA 4: PAGOS (CON CARGA MASIVA MEJORADA)
 # ==========================================
 elif menu == "📜 Pagos":
     st.title("📜 Historial de Pagos")
     
+    # --- 1. CARGA MANUAL (1 a 1) ---
     with st.expander("➕ Agregar Pago de Prueba (Solo para testing)"):
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -182,8 +183,98 @@ elif menu == "📜 Pagos":
                 st.success(f"✅ Pago de {cupo_pago} registrado con éxito!")
                 st.rerun()
     
+    # --- 2. CARGA MASIVA (OPCIÓN A CON DETALLE DE SOCIOS CREADOS) ---
+    with st.expander("📤 Carga Masiva de Pagos (Sube un archivo CSV/Excel)"):
+        st.info("El archivo debe tener las columnas: **Cupo**, **Monto** y **Referencia**.\n\n"
+                "⚠️ **Opción A activada:** Si un socio no existe, el sistema lo creará automáticamente con el nombre 'Socio C-XXX' y teléfono vacío. Luego deberás editar sus datos en la pestaña 'Socios'.\n\n"
+                "📌 **Detalle:** Al finalizar, te mostraremos cuántos socios ya existían y cuántos fueron creados nuevos.")
+        archivo_masivo = st.file_uploader("Selecciona archivo", type=['csv', 'xlsx'], key="masivo_upload")
+        
+        if archivo_masivo is not None and st.button("🚀 Cargar Pagos Masivos", key="masivo_btn"):
+            try:
+                # Leer archivo
+                if archivo_masivo.name.endswith('.csv'):
+                    df_masivo = pd.read_csv(archivo_masivo)
+                else:
+                    df_masivo = pd.read_excel(archivo_masivo)
+                
+                # Limpiar nombres de columnas
+                df_masivo.columns = df_masivo.columns.str.strip().str.lower()
+                
+                # Verificar columnas requeridas
+                columnas_requeridas = ['cupo', 'monto', 'referencia']
+                if not all(col in df_masivo.columns for col in columnas_requeridas):
+                    st.error(f"El archivo debe contener las columnas: {', '.join(columnas_requeridas)} (sin importar mayúsculas).")
+                else:
+                    session = SessionLocal()
+                    registrados = 0
+                    errores = 0
+                    socios_creados = 0
+                    socios_existentes = 0
+                    detalles = []  # Para mostrar el detalle de cada fila
+                    
+                    for index, row in df_masivo.iterrows():
+                        try:
+                            cupo_val = str(row['cupo']).strip()
+                            monto_val = float(str(row['monto']).replace(',', '.'))
+                            ref_val = str(row['referencia']).strip()
+                            
+                            # Verificar si el socio existe
+                            socio = session.query(Socio).filter(Socio.cupo == cupo_val).first()
+                            if not socio:
+                                nuevo_socio = Socio(cupo=cupo_val, nombre=f"Socio {cupo_val}", telefono="")
+                                session.add(nuevo_socio)
+                                session.flush()
+                                socios_creados += 1
+                                estado_socio = "🆕 Creado"
+                            else:
+                                socios_existentes += 1
+                                estado_socio = "✅ Existente"
+                            
+                            # Crear el pago
+                            nuevo_pago = Pago(
+                                cupo=cupo_val,
+                                monto=monto_val,
+                                referencia=ref_val,
+                                estatus='Pendiente'
+                            )
+                            session.add(nuevo_pago)
+                            registrados += 1
+                            
+                            # Guardar detalle (opcional, para mostrarlo si se desea)
+                            detalles.append({
+                                "Cupo": cupo_val,
+                                "Monto": monto_val,
+                                "Referencia": ref_val,
+                                "Estado Socio": estado_socio
+                            })
+                        except Exception as e:
+                            errores += 1
+                            st.warning(f"Error en fila {index+2}: {str(e)}")
+                    
+                    session.commit()
+                    session.close()
+                    
+                    # Mostrar resumen detallado
+                    st.success(f"✅ ¡{registrados} pagos cargados exitosamente! (Errores: {errores})")
+                    st.info(f"📊 **Resumen de socios:** {socios_existentes} ya existían, {socios_creados} fueron creados automáticamente.")
+                    
+                    # Opcional: mostrar una tabla con el detalle de socio creado o existente
+                    if detalles:
+                        df_detalle = pd.DataFrame(detalles)
+                        st.subheader("📋 Detalle de la carga")
+                        st.dataframe(df_detalle, use_container_width=True)
+                    
+                    if socios_creados > 0:
+                        st.warning("⚠️ Recuerda editar los datos de los socios creados automáticamente (nombre y teléfono) en la pestaña 'Socios'.")
+                    
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Error al leer el archivo: {str(e)}")
+    
     st.divider()
     
+    # --- TABLA DE PAGOS ---
     col_filtro, col_acciones, col_borrar = st.columns([2, 1, 1])
     with col_filtro:
         filtro = st.selectbox("Filtrar por estatus", ["Todos", "Pendiente", "Conciliado"])
@@ -245,7 +336,6 @@ elif menu == "📜 Pagos":
         with col_acciones:
             st.write("")
             st.write("")
-            # Descarga CSV
             csv_completo = df_pagos.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
             st.download_button(
                 label="📥 Descargar CSV",
@@ -255,7 +345,6 @@ elif menu == "📜 Pagos":
                 use_container_width=True
             )
             
-            # Generación de PDF (con botón para no relentizar)
             if st.button("📄 Generar Historial PDF", key="gen_pdf_pagos"):
                 st.session_state['pdf_pagos_data'] = generar_pdf_historial_pagos(df_pagos)
             
@@ -300,7 +389,6 @@ else:
     session.close()
     
     if conciliaciones:
-        # Mostrar tabla con las conciliaciones
         data = []
         for c in conciliaciones:
             data.append({
@@ -313,7 +401,6 @@ else:
         df_conciliaciones = pd.DataFrame(data)
         st.dataframe(df_conciliaciones, use_container_width=True)
         
-        # Opciones para cada conciliación: exportar detalle y eliminar
         st.subheader("📌 Acciones por Conciliación")
         opciones = {f"{row['Fecha/Hora']} - {row['Total Pagos']} pagos - ${row['Monto Total']:,.2f}": row['ID'] for _, row in df_conciliaciones.iterrows()}
         seleccion = st.selectbox("Selecciona una conciliación para gestionar:", list(opciones.keys()))
@@ -375,7 +462,6 @@ else:
                     session = SessionLocal()
                     conciliacion = session.query(Conciliacion).get(conciliacion_id)
                     if conciliacion:
-                        # Eliminar las relaciones en la tabla intermedia
                         session.execute(conciliacion_pago.delete().where(conciliacion_pago.c.conciliacion_id == conciliacion_id))
                         session.delete(conciliacion)
                         session.commit()
@@ -385,7 +471,6 @@ else:
                 else:
                     st.error("❌ Debes marcar la casilla de confirmación.")
         
-        # Botón para descargar el historial completo (resumen)
         st.divider()
         col_csv, col_pdf = st.columns(2)
         with col_csv:
