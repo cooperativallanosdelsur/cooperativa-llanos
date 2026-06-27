@@ -33,7 +33,7 @@ if not st.session_state.authenticated:
 st.sidebar.title("🚚 Menú")
 menu = st.sidebar.radio("Navegación", ["📊 Dashboard", "📥 Conciliación", "👥 Socios", "📜 Pagos", "📊 Reportes"])
 
-# Cargar datos
+# Cargar datos para mostrar contadores
 @st.cache_data(ttl=60)
 def load_data():
     session = SessionLocal()
@@ -82,7 +82,6 @@ if menu == "📊 Dashboard":
             st.page_link("app_admin_pro.py", label="📋 Ver todos los socios", icon="👥")
         except:
             st.markdown("[📋 Ver todos los socios](#)", unsafe_allow_html=True)
-            st.warning("⚠️ Actualiza Streamlit a la versión 1.33+ para usar navegación directa.")
     
     if not pagos_df.empty:
         pagos_df['fecha'] = pd.to_datetime(pagos_df['fecha_reporte']).dt.date
@@ -110,7 +109,7 @@ elif menu == "📥 Conciliación":
         os.remove(f"temp_{archivo.name}")
 
 # ==========================================
-# PÁGINA 3: SOCIOS (con carga masiva y control de duplicados)
+# PÁGINA 3: SOCIOS (con carga masiva)
 # ==========================================
 elif menu == "👥 Socios":
     st.title("👥 Transportistas")
@@ -164,8 +163,9 @@ elif menu == "👥 Socios":
         
         if archivo_socios is not None and st.button("🚀 Cargar Socios Masivos", key="btn_socios"):
             try:
+                # Leer archivo
                 if archivo_socios.name.endswith('.csv'):
-                    df_socios = pd.read_csv(archivo_socios)
+                    df_socios = pd.read_csv(archivo_socios, encoding='utf-8')
                 else:
                     df_socios = pd.read_excel(archivo_socios)
                 
@@ -264,12 +264,12 @@ elif menu == "👥 Socios":
             st.info("📭 No hay socios registrados aún.")
 
 # ==========================================
-# PÁGINA 4: PAGOS (con nuevo flujo de autorización)
+# PÁGINA 4: PAGOS (con nuevo flujo de autorización corregido)
 # ==========================================
 elif menu == "📜 Pagos":
     st.title("📜 Historial de Pagos")
     
-    # --- 1. CARGA MANUAL (1 a 1) con validación de socio ---
+    # --- 1. CARGA MANUAL (1 a 1) ---
     with st.expander("➕ Agregar Pago de Prueba (Solo para testing)"):
         st.info("⚠️ El sistema validará que el socio exista. Si no existe, no se registrará el pago.")
         col1, col2, col3 = st.columns(3)
@@ -301,7 +301,7 @@ elif menu == "📜 Pagos":
             else:
                 st.error("Todos los campos son obligatorios.")
     
-    # --- 2. CARGA MASIVA CON AUTORIZACIÓN (NUEVO FLUJO) ---
+    # --- 2. CARGA MASIVA CON AUTORIZACIÓN (CORREGIDA) ---
     with st.expander("📤 Carga Masiva de Pagos (Sube un archivo CSV/Excel)"):
         st.info("**Nuevo flujo:**\n\n"
                 "1️⃣ Sube el archivo con columnas: **Cupo**, **Monto**, **Referencia**.\n"
@@ -315,8 +315,9 @@ elif menu == "📜 Pagos":
             # Botón para analizar
             if st.button("🔍 Analizar archivo", key="analizar_btn"):
                 try:
+                    # Leer archivo
                     if archivo_masivo.name.endswith('.csv'):
-                        df_masivo = pd.read_csv(archivo_masivo)
+                        df_masivo = pd.read_csv(archivo_masivo, encoding='utf-8')
                     else:
                         df_masivo = pd.read_excel(archivo_masivo)
                     
@@ -373,16 +374,20 @@ elif menu == "📜 Pagos":
                             st.dataframe(df_no_existentes, use_container_width=True)
                             st.caption("Si autorizas, se crearán con nombre genérico 'Socio C-XXX' y teléfono vacío.")
                         
+                        # Guardar en session_state para usarlos en los botones
+                        st.session_state['existentes'] = existentes
+                        st.session_state['no_existentes'] = no_existentes
+                        
                         # Botones de acción
                         st.divider()
                         col_btn1, col_btn2 = st.columns(2)
                         
                         with col_btn1:
                             if st.button("📝 Registrar solo pagos de socios existentes", key="btn_existentes"):
-                                if existentes:
+                                if 'existentes' in st.session_state and st.session_state['existentes']:
                                     session = SessionLocal()
                                     registrados = 0
-                                    for item in existentes:
+                                    for item in st.session_state['existentes']:
                                         nuevo_pago = Pago(
                                             cupo=item["Cupo"],
                                             monto=item["Monto"],
@@ -403,38 +408,41 @@ elif menu == "📜 Pagos":
                                 session = SessionLocal()
                                 registrados = 0
                                 creados = 0
-                                for item in no_existentes:
-                                    # Crear socio
-                                    cupo = item["Cupo"]
-                                    socio = session.query(Socio).filter(Socio.cupo == cupo).first()
-                                    if not socio:
-                                        nuevo_socio = Socio(cupo=cupo, nombre=f"Socio {cupo}", telefono="")
-                                        session.add(nuevo_socio)
-                                        session.flush()
-                                        creados += 1
-                                    # Registrar pago (tanto de existentes como de no existentes)
-                                    # Procesamos todos los pagos (existentes y no existentes) juntos
-                                    # Para simplificar, combinamos ambas listas y registramos
-                                # Mejor: combinar los pagos de existentes y no existentes
-                                todos_pagos = existentes + no_existentes
+                                
+                                # Crear socios faltantes
+                                if 'no_existentes' in st.session_state:
+                                    for item in st.session_state['no_existentes']:
+                                        cupo = item["Cupo"]
+                                        socio = session.query(Socio).filter(Socio.cupo == cupo).first()
+                                        if not socio:
+                                            nuevo_socio = Socio(cupo=cupo, nombre=f"Socio {cupo}", telefono="")
+                                            session.add(nuevo_socio)
+                                            session.flush()
+                                            creados += 1
+                                
+                                # Registrar todos los pagos (existentes y no existentes)
+                                todos_pagos = []
+                                if 'existentes' in st.session_state:
+                                    todos_pagos.extend(st.session_state['existentes'])
+                                if 'no_existentes' in st.session_state:
+                                    todos_pagos.extend(st.session_state['no_existentes'])
+                                
                                 for item in todos_pagos:
-                                    # Verificar que el socio existe (ya debería)
-                                    socio = session.query(Socio).filter(Socio.cupo == item["Cupo"]).first()
-                                    if socio:
-                                        nuevo_pago = Pago(
-                                            cupo=item["Cupo"],
-                                            monto=item["Monto"],
-                                            referencia=item["Referencia"],
-                                            estatus='Pendiente'
-                                        )
-                                        session.add(nuevo_pago)
-                                        registrados += 1
+                                    nuevo_pago = Pago(
+                                        cupo=item["Cupo"],
+                                        monto=item["Monto"],
+                                        referencia=item["Referencia"],
+                                        estatus='Pendiente'
+                                    )
+                                    session.add(nuevo_pago)
+                                    registrados += 1
+                                
                                 session.commit()
                                 session.close()
                                 st.success(f"✅ Se registraron {registrados} pagos y se crearon {creados} socios nuevos.")
                                 st.rerun()
                         
-                        # Si no hay no_existentes, el botón de todos los pagos registrará solo existentes
+                        # Limpiar session_state después de usar (opcional)
                 except Exception as e:
                     st.error(f"Error al leer el archivo: {str(e)}")
     
