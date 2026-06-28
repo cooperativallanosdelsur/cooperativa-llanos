@@ -7,7 +7,7 @@ from conciliador import ejecutar_conciliacion
 import os
 import unicodedata
 
-# Importaciones correctas
+# Importaciones correctas desde reportes.py
 from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo,
                       generar_pdf_historial_conciliaciones, generar_pdf_detalle_conciliacion,
                       generar_pdf_historial_pagos, generar_pdf_lista_socios)
@@ -86,20 +86,202 @@ if menu == "📊 Dashboard":
         st.dataframe(pagos_df.sort_values('fecha_reporte', ascending=False).head(10)[['cupo', 'monto', 'referencia', 'estatus']])
 
 # ==========================================
-# PÁGINA 2: CONCILIACIÓN
+# PÁGINA 2: CONCILIACIÓN (CON CARGA DE PAGOS INTEGRADA)
 # ==========================================
 elif menu == "📥 Conciliación":
-    st.title("📥 Subir Estado de Cuenta")
-    archivo = st.file_uploader("Carga tu archivo .CSV o .XLSX", type=['csv', 'xlsx'])
+    st.title("📥 Conciliación Bancaria")
     
-    if archivo is not None and st.button("🚀 Ejecutar Conciliación"):
-        with open(f"temp_{archivo.name}", "wb") as f:
-            f.write(archivo.getbuffer())
-        with st.spinner("Cruzando datos..."):
-            resultado = ejecutar_conciliacion(f"temp_{archivo.name}")
-        st.success(resultado["mensaje"])
-        st.info(f"⏳ Pendientes: {resultado['total_pendientes_restantes']}")
-        os.remove(f"temp_{archivo.name}")
+    # --- SECCIÓN 1: CARGA DE PAGOS DE SOCIOS (NUEVO) ---
+    with st.expander("📤 Cargar pagos de socios (CSV/Excel)", expanded=False):
+        st.info("Sube aquí el archivo con los pagos reportados por los socios.\n\n"
+                "Este archivo debe tener las columnas: **Cupo**, **Monto**, **Referencia**.\n"
+                "El sistema analizará los datos y te permitirá registrarlos (creando socios si es necesario).\n\n"
+                "⚠️ Los pagos registrados aquí aparecerán automáticamente en la pestaña **'Pagos'**.")
+        
+        archivo_pagos_conc = st.file_uploader("Selecciona el archivo de pagos", type=['csv', 'xlsx'], key="upload_pagos_conc")
+        
+        if archivo_pagos_conc is not None:
+            # Botón de análisis
+            if st.button("🔍 Analizar pagos", key="analizar_pagos_conc"):
+                try:
+                    if archivo_pagos_conc.name.endswith('.csv'):
+                        try:
+                            df_pagos_conc = pd.read_csv(archivo_pagos_conc, encoding='utf-8-sig')
+                        except:
+                            df_pagos_conc = pd.read_csv(archivo_pagos_conc, encoding='latin-1')
+                    else:
+                        df_pagos_conc = pd.read_excel(archivo_pagos_conc)
+                    
+                    # Normalizar nombres de columnas
+                    def normalize_column_name(col):
+                        col = unicodedata.normalize('NFKD', col).encode('ascii', 'ignore').decode('utf-8')
+                        return col.strip().lower()
+                    
+                    df_pagos_conc.columns = [normalize_column_name(col) for col in df_pagos_conc.columns]
+                    
+                    col_cupo = None
+                    col_monto = None
+                    col_ref = None
+                    for col in df_pagos_conc.columns:
+                        if 'cupo' in col:
+                            col_cupo = col
+                        elif 'monto' in col or 'importe' in col:
+                            col_monto = col
+                        elif 'referencia' in col or 'ref' in col:
+                            col_ref = col
+                    
+                    if col_cupo is None or col_monto is None or col_ref is None:
+                        st.error("No se encontraron las columnas 'Cupo', 'Monto' y 'Referencia'. Verifica los encabezados.")
+                    else:
+                        df_pagos_conc = df_pagos_conc.rename(columns={
+                            col_cupo: 'cupo',
+                            col_monto: 'monto',
+                            col_ref: 'referencia'
+                        })
+                        
+                        st.subheader("📋 Vista previa del archivo")
+                        st.dataframe(df_pagos_conc.head(5), use_container_width=True)
+                        
+                        session = SessionLocal()
+                        existentes_conc = []
+                        no_existentes_conc = []
+                        
+                        for index, row in df_pagos_conc.iterrows():
+                            try:
+                                cupo_val = str(row['cupo']).strip()
+                                monto_val = float(str(row['monto']).replace(',', '.'))
+                                ref_val = str(row['referencia']).strip()
+                                
+                                socio = session.query(Socio).filter(Socio.cupo == cupo_val).first()
+                                if socio:
+                                    existentes_conc.append({
+                                        "Cupo": cupo_val,
+                                        "Socio": socio.nombre,
+                                        "Monto": monto_val,
+                                        "Referencia": ref_val
+                                    })
+                                else:
+                                    no_existentes_conc.append({
+                                        "Cupo": cupo_val,
+                                        "Nombre sugerido": f"Socio {cupo_val}",
+                                        "Monto": monto_val,
+                                        "Referencia": ref_val
+                                    })
+                            except Exception as e:
+                                st.warning(f"Error en fila {index+2}: {str(e)}")
+                        
+                        session.close()
+                        
+                        # Guardar en session_state específico de conciliación
+                        st.session_state['existentes_conc'] = existentes_conc
+                        st.session_state['no_existentes_conc'] = no_existentes_conc
+                        st.session_state['analisis_pagos_conc'] = True
+                        
+                        st.subheader("📊 Resumen del análisis")
+                        st.info(f"Total de pagos en archivo: {len(df_pagos_conc)}")
+                        st.success(f"✅ Socios existentes: {len(existentes_conc)}")
+                        st.warning(f"⚠️ Socios NO existentes (se crearán si autorizas): {len(no_existentes_conc)}")
+                        
+                        if existentes_conc:
+                            st.subheader("📋 Pagos de socios existentes")
+                            st.dataframe(pd.DataFrame(existentes_conc), use_container_width=True)
+                        
+                        if no_existentes_conc:
+                            st.subheader("🆕 Socios NO existentes (requieren autorización)")
+                            st.dataframe(pd.DataFrame(no_existentes_conc), use_container_width=True)
+                            st.caption("Si autorizas, se crearán con nombre genérico 'Socio C-XXX' y teléfono vacío.")
+                        
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Error al leer el archivo: {str(e)}")
+            
+            # --- BOTONES DE REGISTRO (si el análisis ya se realizó) ---
+            if st.session_state.get('analisis_pagos_conc', False):
+                st.divider()
+                st.subheader("📌 Acciones de registro")
+                
+                col_res1, col_res2 = st.columns(2)
+                with col_res1:
+                    st.metric("Socios existentes", len(st.session_state.get('existentes_conc', [])))
+                with col_res2:
+                    st.metric("Socios NO existentes", len(st.session_state.get('no_existentes_conc', [])))
+                
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("📝 Registrar solo pagos de socios existentes", key="btn_existentes_conc"):
+                        existentes_conc = st.session_state.get('existentes_conc', [])
+                        if existentes_conc:
+                            session = SessionLocal()
+                            registrados = 0
+                            for item in existentes_conc:
+                                nuevo_pago = Pago(
+                                    cupo=item["Cupo"],
+                                    monto=item["Monto"],
+                                    referencia=item["Referencia"],
+                                    estatus='Pendiente'
+                                )
+                                session.add(nuevo_pago)
+                                registrados += 1
+                            session.commit()
+                            session.close()
+                            st.success(f"✅ Se registraron {registrados} pagos de socios existentes. (Los socios faltantes fueron omitidos)")
+                            st.session_state['analisis_pagos_conc'] = False
+                            st.rerun()
+                        else:
+                            st.info("No hay pagos de socios existentes para registrar.")
+                
+                with col_btn2:
+                    if st.button("🚀 Registrar TODOS los pagos (crear socios faltantes)", key="btn_todos_conc"):
+                        session = SessionLocal()
+                        registrados = 0
+                        creados = 0
+                        
+                        no_existentes_conc = st.session_state.get('no_existentes_conc', [])
+                        existentes_conc = st.session_state.get('existentes_conc', [])
+                        
+                        for item in no_existentes_conc:
+                            cupo = item["Cupo"]
+                            socio = session.query(Socio).filter(Socio.cupo == cupo).first()
+                            if not socio:
+                                nuevo_socio = Socio(cupo=cupo, nombre=f"Socio {cupo}", telefono="")
+                                session.add(nuevo_socio)
+                                session.flush()
+                                creados += 1
+                        
+                        todos_pagos = existentes_conc + no_existentes_conc
+                        for item in todos_pagos:
+                            nuevo_pago = Pago(
+                                cupo=item["Cupo"],
+                                monto=item["Monto"],
+                                referencia=item["Referencia"],
+                                estatus='Pendiente'
+                            )
+                            session.add(nuevo_pago)
+                            registrados += 1
+                        
+                        session.commit()
+                        session.close()
+                        st.success(f"✅ Se registraron {registrados} pagos y se crearon {creados} socios nuevos.")
+                        st.session_state['analisis_pagos_conc'] = False
+                        st.rerun()
+    
+    st.divider()
+    
+    # --- SECCIÓN 2: SUBIR ESTADO DE CUENTA Y CONCILIAR (EXISTENTE) ---
+    with st.expander("📥 Subir Estado de Cuenta del Banco", expanded=True):
+        st.info("Sube el archivo del banco (CSV o Excel) con las columnas **Referencia** y **Monto**.\n\n"
+                "Luego haz clic en 'Ejecutar Conciliación' para cruzar los datos con los pagos registrados.")
+        
+        archivo_banco = st.file_uploader("Selecciona el archivo del banco", type=['csv', 'xlsx'], key="upload_banco")
+        
+        if archivo_banco is not None and st.button("🚀 Ejecutar Conciliación", key="btn_conciliar"):
+            with open(f"temp_{archivo_banco.name}", "wb") as f:
+                f.write(archivo_banco.getbuffer())
+            with st.spinner("Cruzando datos..."):
+                resultado = ejecutar_conciliacion(f"temp_{archivo_banco.name}")
+            st.success(resultado["mensaje"])
+            st.info(f"⏳ Pendientes: {resultado['total_pendientes_restantes']}")
+            os.remove(f"temp_{archivo_banco.name}")
 
 # ==========================================
 # PÁGINA 3: SOCIOS
@@ -309,7 +491,7 @@ elif menu == "👥 Socios":
             st.info("📭 No hay socios registrados aún.")
 
 # ==========================================
-# PÁGINA 4: PAGOS (CON CARGA MASIVA CORREGIDA - ESTRUCTURA DE BOTONES FUERA DEL ANALISIS)
+# PÁGINA 4: PAGOS (CON CARGA MASIVA Y AUTORIZACIÓN)
 # ==========================================
 elif menu == "📜 Pagos":
     st.title("📜 Historial de Pagos")
@@ -346,7 +528,7 @@ elif menu == "📜 Pagos":
             else:
                 st.error("Todos los campos son obligatorios.")
     
-    # --- CARGA MASIVA CON ESTRUCTURA CORREGIDA ---
+    # --- CARGA MASIVA CON AUTORIZACIÓN (DESDE PAGOS) ---
     with st.expander("📤 Carga Masiva de Pagos (Sube un archivo CSV/Excel)"):
         st.info("**Nuevo flujo:**\n\n"
                 "1️⃣ Sube el archivo con columnas: **Cupo**, **Monto**, **Referencia**.\n"
@@ -356,105 +538,103 @@ elif menu == "📜 Pagos":
         
         archivo_masivo = st.file_uploader("Selecciona archivo", type=['csv', 'xlsx'], key="masivo_upload")
         
-        # --- BOTÓN DE ANÁLISIS ---
-        if archivo_masivo is not None and st.button("🔍 Analizar archivo", key="analizar_btn"):
-            try:
-                if archivo_masivo.name.endswith('.csv'):
-                    try:
-                        df_masivo = pd.read_csv(archivo_masivo, encoding='utf-8-sig')
-                    except:
-                        df_masivo = pd.read_csv(archivo_masivo, encoding='latin-1')
-                else:
-                    df_masivo = pd.read_excel(archivo_masivo)
-                
-                def normalize_column_name(col):
-                    col = unicodedata.normalize('NFKD', col).encode('ascii', 'ignore').decode('utf-8')
-                    return col.strip().lower()
-                
-                df_masivo.columns = [normalize_column_name(col) for col in df_masivo.columns]
-                
-                col_cupo = None
-                col_monto = None
-                col_ref = None
-                for col in df_masivo.columns:
-                    if 'cupo' in col:
-                        col_cupo = col
-                    elif 'monto' in col or 'importe' in col:
-                        col_monto = col
-                    elif 'referencia' in col or 'ref' in col:
-                        col_ref = col
-                
-                if col_cupo is None or col_monto is None or col_ref is None:
-                    st.error("No se encontraron las columnas 'Cupo', 'Monto' y 'Referencia'. Verifica los encabezados.")
-                else:
-                    df_masivo = df_masivo.rename(columns={
-                        col_cupo: 'cupo',
-                        col_monto: 'monto',
-                        col_ref: 'referencia'
-                    })
-                    
-                    st.subheader("📋 Vista previa del archivo")
-                    st.dataframe(df_masivo.head(5), use_container_width=True)
-                    
-                    session = SessionLocal()
-                    existentes = []
-                    no_existentes = []
-                    
-                    for index, row in df_masivo.iterrows():
+        if archivo_masivo is not None:
+            if st.button("🔍 Analizar archivo", key="analizar_btn"):
+                try:
+                    if archivo_masivo.name.endswith('.csv'):
                         try:
-                            cupo_val = str(row['cupo']).strip()
-                            monto_val = float(str(row['monto']).replace(',', '.'))
-                            ref_val = str(row['referencia']).strip()
-                            
-                            socio = session.query(Socio).filter(Socio.cupo == cupo_val).first()
-                            if socio:
-                                existentes.append({
-                                    "Cupo": cupo_val,
-                                    "Socio": socio.nombre,
-                                    "Monto": monto_val,
-                                    "Referencia": ref_val
-                                })
-                            else:
-                                no_existentes.append({
-                                    "Cupo": cupo_val,
-                                    "Nombre sugerido": f"Socio {cupo_val}",
-                                    "Monto": monto_val,
-                                    "Referencia": ref_val
-                                })
-                        except Exception as e:
-                            st.warning(f"Error en fila {index+2}: {str(e)}")
+                            df_masivo = pd.read_csv(archivo_masivo, encoding='utf-8-sig')
+                        except:
+                            df_masivo = pd.read_csv(archivo_masivo, encoding='latin-1')
+                    else:
+                        df_masivo = pd.read_excel(archivo_masivo)
                     
-                    session.close()
+                    def normalize_column_name(col):
+                        col = unicodedata.normalize('NFKD', col).encode('ascii', 'ignore').decode('utf-8')
+                        return col.strip().lower()
                     
-                    # Guardar en sesión y marcar análisis realizado
-                    st.session_state['existentes'] = existentes
-                    st.session_state['no_existentes'] = no_existentes
-                    st.session_state['analisis_realizado'] = True
+                    df_masivo.columns = [normalize_column_name(col) for col in df_masivo.columns]
                     
-                    st.subheader("📊 Resumen del análisis")
-                    st.info(f"Total de pagos en archivo: {len(df_masivo)}")
-                    st.success(f"✅ Socios existentes: {len(existentes)}")
-                    st.warning(f"⚠️ Socios NO existentes (se crearán si autorizas): {len(no_existentes)}")
+                    col_cupo = None
+                    col_monto = None
+                    col_ref = None
+                    for col in df_masivo.columns:
+                        if 'cupo' in col:
+                            col_cupo = col
+                        elif 'monto' in col or 'importe' in col:
+                            col_monto = col
+                        elif 'referencia' in col or 'ref' in col:
+                            col_ref = col
                     
-                    if existentes:
-                        st.subheader("📋 Pagos de socios existentes (se registrarán automáticamente)")
-                        st.dataframe(pd.DataFrame(existentes), use_container_width=True)
-                    
-                    if no_existentes:
-                        st.subheader("🆕 Socios NO existentes (requieren autorización)")
-                        st.dataframe(pd.DataFrame(no_existentes), use_container_width=True)
-                        st.caption("Si autorizas, se crearán con nombre genérico 'Socio C-XXX' y teléfono vacío.")
-                    
-                    st.rerun()  # Forzar recarga para mostrar los botones de registro
-            except Exception as e:
-                st.error(f"Error al leer el archivo: {str(e)}")
+                    if col_cupo is None or col_monto is None or col_ref is None:
+                        st.error("No se encontraron las columnas 'Cupo', 'Monto' y 'Referencia'. Verifica los encabezados.")
+                    else:
+                        df_masivo = df_masivo.rename(columns={
+                            col_cupo: 'cupo',
+                            col_monto: 'monto',
+                            col_ref: 'referencia'
+                        })
+                        
+                        st.subheader("📋 Vista previa del archivo")
+                        st.dataframe(df_masivo.head(5), use_container_width=True)
+                        
+                        session = SessionLocal()
+                        existentes = []
+                        no_existentes = []
+                        
+                        for index, row in df_masivo.iterrows():
+                            try:
+                                cupo_val = str(row['cupo']).strip()
+                                monto_val = float(str(row['monto']).replace(',', '.'))
+                                ref_val = str(row['referencia']).strip()
+                                
+                                socio = session.query(Socio).filter(Socio.cupo == cupo_val).first()
+                                if socio:
+                                    existentes.append({
+                                        "Cupo": cupo_val,
+                                        "Socio": socio.nombre,
+                                        "Monto": monto_val,
+                                        "Referencia": ref_val
+                                    })
+                                else:
+                                    no_existentes.append({
+                                        "Cupo": cupo_val,
+                                        "Nombre sugerido": f"Socio {cupo_val}",
+                                        "Monto": monto_val,
+                                        "Referencia": ref_val
+                                    })
+                            except Exception as e:
+                                st.warning(f"Error en fila {index+2}: {str(e)}")
+                        
+                        session.close()
+                        
+                        st.session_state['existentes'] = existentes
+                        st.session_state['no_existentes'] = no_existentes
+                        st.session_state['analisis_realizado'] = True
+                        
+                        st.subheader("📊 Resumen del análisis")
+                        st.info(f"Total de pagos en archivo: {len(df_masivo)}")
+                        st.success(f"✅ Socios existentes: {len(existentes)}")
+                        st.warning(f"⚠️ Socios NO existentes (se crearán si autorizas): {len(no_existentes)}")
+                        
+                        if existentes:
+                            st.subheader("📋 Pagos de socios existentes (se registrarán automáticamente)")
+                            st.dataframe(pd.DataFrame(existentes), use_container_width=True)
+                        
+                        if no_existentes:
+                            st.subheader("🆕 Socios NO existentes (requieren autorización)")
+                            st.dataframe(pd.DataFrame(no_existentes), use_container_width=True)
+                            st.caption("Si autorizas, se crearán con nombre genérico 'Socio C-XXX' y teléfono vacío.")
+                        
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Error al leer el archivo: {str(e)}")
         
         # --- SECCIÓN DE REGISTRO (SIEMPRE VISIBLE SI EL ANÁLISIS ESTÁ REALIZADO) ---
         if st.session_state.get('analisis_realizado', False):
             st.divider()
             st.subheader("📌 Acciones de registro")
             
-            # Mostrar resumen rápido del análisis actual (opcional)
             col_res1, col_res2 = st.columns(2)
             with col_res1:
                 st.metric("Socios existentes", len(st.session_state.get('existentes', [])))
@@ -481,7 +661,7 @@ elif menu == "📜 Pagos":
                         session.commit()
                         session.close()
                         st.success(f"✅ Se registraron {registrados} pagos de socios existentes. (Los socios faltantes fueron omitidos)")
-                        st.session_state['analisis_realizado'] = False  # Limpiar estado
+                        st.session_state['analisis_realizado'] = False
                         st.rerun()
                     else:
                         st.info("No hay pagos de socios existentes para registrar.")
@@ -495,7 +675,6 @@ elif menu == "📜 Pagos":
                     no_existentes = st.session_state.get('no_existentes', [])
                     existentes = st.session_state.get('existentes', [])
                     
-                    # Crear socios faltantes
                     for item in no_existentes:
                         cupo = item["Cupo"]
                         socio = session.query(Socio).filter(Socio.cupo == cupo).first()
@@ -505,7 +684,6 @@ elif menu == "📜 Pagos":
                             session.flush()
                             creados += 1
                     
-                    # Registrar todos los pagos
                     todos_pagos = existentes + no_existentes
                     for item in todos_pagos:
                         nuevo_pago = Pago(
@@ -520,7 +698,7 @@ elif menu == "📜 Pagos":
                     session.commit()
                     session.close()
                     st.success(f"✅ Se registraron {registrados} pagos y se crearon {creados} socios nuevos.")
-                    st.session_state['analisis_realizado'] = False  # Limpiar estado
+                    st.session_state['analisis_realizado'] = False
                     st.rerun()
     
     st.divider()
