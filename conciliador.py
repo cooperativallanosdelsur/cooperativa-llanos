@@ -18,7 +18,7 @@ def ejecutar_conciliacion(ruta_archivo_bancos):
     # Buscar pagos pendientes
     pendientes = session.query(Pago).filter(Pago.estatus == 'Pendiente').all()
     pagos_conciliados = []
-    pagos_pendientes = []  # Lista para almacenar los pendientes con sus datos
+    pagos_pendientes = []
     
     for pago in pendientes:
         coincidencia = df_bancos[
@@ -30,7 +30,6 @@ def ejecutar_conciliacion(ruta_archivo_bancos):
             pago.fecha_conciliacion = datetime.now()
             pagos_conciliados.append(pago)
         else:
-            # Guardar información del pago pendiente
             pagos_pendientes.append({
                 "Cupo": pago.cupo,
                 "Monto": pago.monto,
@@ -38,7 +37,6 @@ def ejecutar_conciliacion(ruta_archivo_bancos):
                 "Fecha Reporte": pago.fecha_reporte.strftime("%Y-%m-%d %H:%M")
             })
     
-    # Si se concilió al menos un pago, crear registro de conciliación
     conciliados_hoy = len(pagos_conciliados)
     if conciliados_hoy > 0:
         nueva_conciliacion = Conciliacion(
@@ -57,13 +55,11 @@ def ejecutar_conciliacion(ruta_archivo_bancos):
             )
     
     session.commit()
-    
-    # Contar cuántos pendientes quedan después de la conciliación
     restantes = session.query(Pago).filter(Pago.estatus == 'Pendiente').count()
     session.close()
     
     return {
         "mensaje": f"✅ {conciliados_hoy} pagos conciliados automáticamente.",
         "total_pendientes_restantes": restantes,
-        "pendientes": pagos_pendientes  # Ahora retorna la lista detallada
+        "pendientes": pagos_pendientes
     }
