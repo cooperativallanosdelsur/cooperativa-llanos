@@ -7,10 +7,11 @@ from conciliador import ejecutar_conciliacion
 import os
 import unicodedata
 
-# Importaciones correctas desde reportes.py
+# Importaciones desde reportes.py (incluyendo la nueva función)
 from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo,
                       generar_pdf_historial_conciliaciones, generar_pdf_detalle_conciliacion,
-                      generar_pdf_historial_pagos, generar_pdf_lista_socios)
+                      generar_pdf_historial_pagos, generar_pdf_lista_socios,
+                      generar_pdf_pendientes)  # <--- NUEVA IMPORTACIÓN
 
 st.set_page_config(page_title="Llanos del Sur", page_icon="🚛", layout="wide")
 
@@ -86,12 +87,12 @@ if menu == "📊 Dashboard":
         st.dataframe(pagos_df.sort_values('fecha_reporte', ascending=False).head(10)[['cupo', 'monto', 'referencia', 'estatus']])
 
 # ==========================================
-# PÁGINA 2: CONCILIACIÓN (CON CARGA DE PAGOS INTEGRADA)
+# PÁGINA 2: CONCILIACIÓN (CON PDF DE PENDIENTES)
 # ==========================================
 elif menu == "📥 Conciliación":
     st.title("📥 Conciliación Bancaria")
     
-    # --- SECCIÓN 1: CARGA DE PAGOS DE SOCIOS (NUEVO) ---
+    # --- SECCIÓN 1: CARGA DE PAGOS DE SOCIOS ---
     with st.expander("📤 Cargar pagos de socios (CSV/Excel)", expanded=False):
         st.info("Sube aquí el archivo con los pagos reportados por los socios.\n\n"
                 "Este archivo debe tener las columnas: **Cupo**, **Monto**, **Referencia**.\n"
@@ -101,7 +102,6 @@ elif menu == "📥 Conciliación":
         archivo_pagos_conc = st.file_uploader("Selecciona el archivo de pagos", type=['csv', 'xlsx'], key="upload_pagos_conc")
         
         if archivo_pagos_conc is not None:
-            # Botón de análisis
             if st.button("🔍 Analizar pagos", key="analizar_pagos_conc"):
                 try:
                     if archivo_pagos_conc.name.endswith('.csv'):
@@ -112,7 +112,6 @@ elif menu == "📥 Conciliación":
                     else:
                         df_pagos_conc = pd.read_excel(archivo_pagos_conc)
                     
-                    # Normalizar nombres de columnas
                     def normalize_column_name(col):
                         col = unicodedata.normalize('NFKD', col).encode('ascii', 'ignore').decode('utf-8')
                         return col.strip().lower()
@@ -172,7 +171,6 @@ elif menu == "📥 Conciliación":
                         
                         session.close()
                         
-                        # Guardar en session_state específico de conciliación
                         st.session_state['existentes_conc'] = existentes_conc
                         st.session_state['no_existentes_conc'] = no_existentes_conc
                         st.session_state['analisis_pagos_conc'] = True
@@ -195,7 +193,6 @@ elif menu == "📥 Conciliación":
                 except Exception as e:
                     st.error(f"Error al leer el archivo: {str(e)}")
             
-            # --- BOTONES DE REGISTRO (si el análisis ya se realizó) ---
             if st.session_state.get('analisis_pagos_conc', False):
                 st.divider()
                 st.subheader("📌 Acciones de registro")
@@ -267,10 +264,12 @@ elif menu == "📥 Conciliación":
     
     st.divider()
     
-    # --- SECCIÓN 2: SUBIR ESTADO DE CUENTA Y CONCILIAR (EXISTENTE) ---
+    # --- SECCIÓN 2: SUBIR ESTADO DE CUENTA Y CONCILIAR (CON TABLA DE PENDIENTES Y PDF) ---
     with st.expander("📥 Subir Estado de Cuenta del Banco", expanded=True):
         st.info("Sube el archivo del banco (CSV o Excel) con las columnas **Referencia** y **Monto**.\n\n"
-                "Luego haz clic en 'Ejecutar Conciliación' para cruzar los datos con los pagos registrados.")
+                "Luego haz clic en 'Ejecutar Conciliación' para cruzar los datos con los pagos registrados.\n\n"
+                "⚠️ Después de la conciliación, se mostrará la lista detallada de los pagos que **NO** pudieron conciliarse.\n"
+                "Podrás descargar esa lista en **CSV** y en **PDF**.")
         
         archivo_banco = st.file_uploader("Selecciona el archivo del banco", type=['csv', 'xlsx'], key="upload_banco")
         
@@ -281,6 +280,40 @@ elif menu == "📥 Conciliación":
                 resultado = ejecutar_conciliacion(f"temp_{archivo_banco.name}")
             st.success(resultado["mensaje"])
             st.info(f"⏳ Pendientes: {resultado['total_pendientes_restantes']}")
+            
+            # --- MOSTRAR LISTA DE PENDIENTES ---
+            if resultado.get('pendientes'):
+                st.subheader("📋 Detalle de pagos pendientes (no conciliados)")
+                df_pendientes = pd.DataFrame(resultado['pendientes'])
+                st.dataframe(df_pendientes, use_container_width=True)
+                
+                # --- BOTONES DE DESCARGA ---
+                st.subheader("📥 Descargar lista de pendientes")
+                col_csv, col_pdf = st.columns(2)
+                
+                with col_csv:
+                    csv_pendientes = df_pendientes.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                    st.download_button(
+                        label="📥 Descargar CSV",
+                        data=csv_pendientes,
+                        file_name=f"pendientes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                
+                with col_pdf:
+                    if st.button("📄 Generar PDF", key="gen_pdf_pendientes"):
+                        pdf_buffer = generar_pdf_pendientes(df_pendientes)
+                        st.download_button(
+                            label="📥 Descargar PDF",
+                            data=pdf_buffer,
+                            file_name=f"pendientes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
+            else:
+                st.success("🎉 ¡No hay pagos pendientes! Todos los pagos fueron conciliados.")
+            
             os.remove(f"temp_{archivo_banco.name}")
 
 # ==========================================
@@ -491,7 +524,7 @@ elif menu == "👥 Socios":
             st.info("📭 No hay socios registrados aún.")
 
 # ==========================================
-# PÁGINA 4: PAGOS (CON CARGA MASIVA Y AUTORIZACIÓN)
+# PÁGINA 4: PAGOS
 # ==========================================
 elif menu == "📜 Pagos":
     st.title("📜 Historial de Pagos")
@@ -630,7 +663,6 @@ elif menu == "📜 Pagos":
                 except Exception as e:
                     st.error(f"Error al leer el archivo: {str(e)}")
         
-        # --- SECCIÓN DE REGISTRO (SIEMPRE VISIBLE SI EL ANÁLISIS ESTÁ REALIZADO) ---
         if st.session_state.get('analisis_realizado', False):
             st.divider()
             st.subheader("📌 Acciones de registro")
