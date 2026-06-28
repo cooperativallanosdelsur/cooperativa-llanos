@@ -8,7 +8,6 @@ import pandas as pd
 from datetime import datetime
 
 def generar_pdf_reporte_socios(df_reporte):
-    """Genera un PDF con el reporte de socios con estado de pagos."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
@@ -54,7 +53,6 @@ def generar_pdf_reporte_socios(df_reporte):
     return buffer
 
 def generar_pdf_recibo(pago, socio):
-    """Genera un recibo individual en PDF para un pago conciliado."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
@@ -101,7 +99,6 @@ def generar_pdf_recibo(pago, socio):
     return buffer
 
 def generar_pdf_historial_conciliaciones(df_historial):
-    """Genera un PDF con el historial de conciliaciones (resumen)."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
@@ -144,7 +141,6 @@ def generar_pdf_historial_conciliaciones(df_historial):
     return buffer
 
 def generar_pdf_detalle_conciliacion(conciliacion_id, pagos_detalle):
-    """Genera un PDF con el detalle de una conciliación específica."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
@@ -188,7 +184,6 @@ def generar_pdf_detalle_conciliacion(conciliacion_id, pagos_detalle):
     return buffer
 
 def generar_pdf_historial_pagos(df_pagos):
-    """Genera un PDF con el historial completo de pagos."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
@@ -233,7 +228,6 @@ def generar_pdf_historial_pagos(df_pagos):
     return buffer
 
 def generar_pdf_lista_socios(df_socios):
-    """Genera un PDF con la lista simple de socios (Cupo, Nombre, Teléfono)."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
@@ -276,7 +270,7 @@ def generar_pdf_lista_socios(df_socios):
     buffer.seek(0)
     return buffer
 
-# ========== NUEVA FUNCIÓN PARA PDF DE PENDIENTES ==========
+# ========== NUEVA FUNCIÓN PARA PDF DE PENDIENTES (CORREGIDA) ==========
 def generar_pdf_pendientes(df_pendientes):
     """Genera un PDF con la lista de pagos pendientes (no conciliados)."""
     buffer = BytesIO()
