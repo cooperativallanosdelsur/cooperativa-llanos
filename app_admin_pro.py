@@ -5,6 +5,7 @@ from datetime import datetime
 from database import SessionLocal, Pago, Socio, Conciliacion, conciliacion_pago
 from conciliador import ejecutar_conciliacion
 import os
+import io
 
 # Importación de reportes
 from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo, 
@@ -33,7 +34,7 @@ if not st.session_state.authenticated:
 st.sidebar.title("🚚 Menú")
 menu = st.sidebar.radio("Navegación", ["📊 Dashboard", "📥 Conciliación", "👥 Socios", "📜 Pagos", "📊 Reportes"])
 
-# Cargar datos para mostrar contadores
+# Cargar datos
 @st.cache_data(ttl=60)
 def load_data():
     session = SessionLocal()
@@ -74,14 +75,6 @@ if menu == "📊 Dashboard":
             st.dataframe(ultimos_socios, use_container_width=True, hide_index=True)
         else:
             st.info("No hay socios registrados aún.")
-    with col_socios2:
-        st.write("")
-        st.write("")
-        st.write("")
-        try:
-            st.page_link("app_admin_pro.py", label="📋 Ver todos los socios", icon="👥")
-        except:
-            st.markdown("[📋 Ver todos los socios](#)", unsafe_allow_html=True)
     
     if not pagos_df.empty:
         pagos_df['fecha'] = pd.to_datetime(pagos_df['fecha_reporte']).dt.date
@@ -109,7 +102,7 @@ elif menu == "📥 Conciliación":
         os.remove(f"temp_{archivo.name}")
 
 # ==========================================
-# PÁGINA 3: SOCIOS (con carga masiva)
+# PÁGINA 3: SOCIOS (CON CARGA MASIVA CORREGIDA)
 # ==========================================
 elif menu == "👥 Socios":
     st.title("👥 Transportistas")
@@ -130,7 +123,7 @@ elif menu == "👥 Socios":
                     session = SessionLocal()
                     existe = session.query(Socio).filter(Socio.cupo == cupo).first()
                     if existe:
-                        st.warning(f"⚠️ El cupo {cupo} ya está registrado con el nombre '{existe.nombre}'. No se permite duplicar.")
+                        st.warning(f"⚠️ El cupo {cupo} ya está registrado.")
                     else:
                         session.add(Socio(cupo=cupo, nombre=nombre, telefono=telefono))
                         session.commit()
@@ -146,6 +139,7 @@ elif menu == "👥 Socios":
         st.info("El archivo debe tener las columnas: **Cupo**, **Nombre** y **Teléfono**.\n\n"
                 "⚠️ Los cupos duplicados serán omitidos para evitar errores.")
         
+        # Plantilla
         plantilla = pd.DataFrame({
             "Cupo": ["C-001", "C-002"],
             "Nombre": ["Ana López", "Carlos Ruiz"],
@@ -163,13 +157,24 @@ elif menu == "👥 Socios":
         
         if archivo_socios is not None and st.button("🚀 Cargar Socios Masivos", key="btn_socios"):
             try:
-                # Leer archivo
+                # Leer el archivo con detección de encoding
                 if archivo_socios.name.endswith('.csv'):
-                    df_socios = pd.read_csv(archivo_socios, encoding='utf-8')
+                    # Intentar con UTF-8, luego con Latin-1
+                    try:
+                        df_socios = pd.read_csv(archivo_socios, encoding='utf-8-sig')
+                    except:
+                        df_socios = pd.read_csv(archivo_socios, encoding='latin-1')
                 else:
                     df_socios = pd.read_excel(archivo_socios)
                 
+                # Mostrar vista previa
+                st.subheader("📋 Vista previa del archivo")
+                st.dataframe(df_socios.head(5), use_container_width=True)
+                
+                # Limpiar nombres de columnas
                 df_socios.columns = df_socios.columns.str.strip().str.lower()
+                
+                # Verificar columnas requeridas
                 columnas_requeridas = ['cupo', 'nombre', 'telefono']
                 if not all(col in df_socios.columns for col in columnas_requeridas):
                     st.error(f"El archivo debe contener las columnas: {', '.join(columnas_requeridas)} (sin importar mayúsculas).")
@@ -186,6 +191,7 @@ elif menu == "👥 Socios":
                             nombre_val = str(row['nombre']).strip()
                             telefono_val = str(row['telefono']).strip()
                             
+                            # Verificar si el cupo ya existe
                             existe = session.query(Socio).filter(Socio.cupo == cupo_val).first()
                             if existe:
                                 duplicados += 1
@@ -217,9 +223,6 @@ elif menu == "👥 Socios":
                         df_detalle = pd.DataFrame(detalles)
                         st.subheader("📋 Detalle de la carga")
                         st.dataframe(df_detalle, use_container_width=True)
-                    
-                    if duplicados > 0:
-                        st.info("ℹ️ Los socios duplicados fueron omitidos para evitar duplicación.")
                     
                     st.rerun()
             except Exception as e:
@@ -264,14 +267,14 @@ elif menu == "👥 Socios":
             st.info("📭 No hay socios registrados aún.")
 
 # ==========================================
-# PÁGINA 4: PAGOS (con nuevo flujo de autorización corregido)
+# PÁGINA 4: PAGOS (CON CARGA MASIVA Y AUTORIZACIÓN)
 # ==========================================
 elif menu == "📜 Pagos":
     st.title("📜 Historial de Pagos")
     
-    # --- 1. CARGA MANUAL (1 a 1) ---
+    # --- CARGA MANUAL ---
     with st.expander("➕ Agregar Pago de Prueba (Solo para testing)"):
-        st.info("⚠️ El sistema validará que el socio exista. Si no existe, no se registrará el pago.")
+        st.info("⚠️ El sistema validará que el socio exista.")
         col1, col2, col3 = st.columns(3)
         with col1:
             cupo_pago = st.text_input("Cupo del socio", "C-001")
@@ -301,7 +304,7 @@ elif menu == "📜 Pagos":
             else:
                 st.error("Todos los campos son obligatorios.")
     
-    # --- 2. CARGA MASIVA CON AUTORIZACIÓN (CORREGIDA) ---
+    # --- CARGA MASIVA CON AUTORIZACIÓN ---
     with st.expander("📤 Carga Masiva de Pagos (Sube un archivo CSV/Excel)"):
         st.info("**Nuevo flujo:**\n\n"
                 "1️⃣ Sube el archivo con columnas: **Cupo**, **Monto**, **Referencia**.\n"
@@ -312,12 +315,13 @@ elif menu == "📜 Pagos":
         archivo_masivo = st.file_uploader("Selecciona archivo", type=['csv', 'xlsx'], key="masivo_upload")
         
         if archivo_masivo is not None:
-            # Botón para analizar
             if st.button("🔍 Analizar archivo", key="analizar_btn"):
                 try:
-                    # Leer archivo
                     if archivo_masivo.name.endswith('.csv'):
-                        df_masivo = pd.read_csv(archivo_masivo, encoding='utf-8')
+                        try:
+                            df_masivo = pd.read_csv(archivo_masivo, encoding='utf-8-sig')
+                        except:
+                            df_masivo = pd.read_csv(archivo_masivo, encoding='latin-1')
                     else:
                         df_masivo = pd.read_excel(archivo_masivo)
                     
@@ -326,7 +330,10 @@ elif menu == "📜 Pagos":
                     if not all(col in df_masivo.columns for col in columnas_requeridas):
                         st.error(f"El archivo debe contener las columnas: {', '.join(columnas_requeridas)} (sin importar mayúsculas).")
                     else:
-                        # Procesar y clasificar
+                        # Mostrar vista previa
+                        st.subheader("📋 Vista previa del archivo")
+                        st.dataframe(df_masivo.head(5), use_container_width=True)
+                        
                         session = SessionLocal()
                         existentes = []
                         no_existentes = []
@@ -357,7 +364,6 @@ elif menu == "📜 Pagos":
                         
                         session.close()
                         
-                        # Mostrar resultados
                         st.subheader("📊 Resumen del análisis")
                         st.info(f"Total de pagos en archivo: {len(df_masivo)}")
                         st.success(f"✅ Socios existentes: {len(existentes)}")
@@ -374,20 +380,15 @@ elif menu == "📜 Pagos":
                             st.dataframe(df_no_existentes, use_container_width=True)
                             st.caption("Si autorizas, se crearán con nombre genérico 'Socio C-XXX' y teléfono vacío.")
                         
-                        # Guardar en session_state para usarlos en los botones
-                        st.session_state['existentes'] = existentes
-                        st.session_state['no_existentes'] = no_existentes
-                        
-                        # Botones de acción
                         st.divider()
                         col_btn1, col_btn2 = st.columns(2)
                         
                         with col_btn1:
                             if st.button("📝 Registrar solo pagos de socios existentes", key="btn_existentes"):
-                                if 'existentes' in st.session_state and st.session_state['existentes']:
+                                if existentes:
                                     session = SessionLocal()
                                     registrados = 0
-                                    for item in st.session_state['existentes']:
+                                    for item in existentes:
                                         nuevo_pago = Pago(
                                             cupo=item["Cupo"],
                                             monto=item["Monto"],
@@ -408,25 +409,17 @@ elif menu == "📜 Pagos":
                                 session = SessionLocal()
                                 registrados = 0
                                 creados = 0
-                                
-                                # Crear socios faltantes
-                                if 'no_existentes' in st.session_state:
-                                    for item in st.session_state['no_existentes']:
-                                        cupo = item["Cupo"]
-                                        socio = session.query(Socio).filter(Socio.cupo == cupo).first()
-                                        if not socio:
-                                            nuevo_socio = Socio(cupo=cupo, nombre=f"Socio {cupo}", telefono="")
-                                            session.add(nuevo_socio)
-                                            session.flush()
-                                            creados += 1
-                                
-                                # Registrar todos los pagos (existentes y no existentes)
-                                todos_pagos = []
-                                if 'existentes' in st.session_state:
-                                    todos_pagos.extend(st.session_state['existentes'])
-                                if 'no_existentes' in st.session_state:
-                                    todos_pagos.extend(st.session_state['no_existentes'])
-                                
+                                # Primero crear los socios faltantes
+                                for item in no_existentes:
+                                    cupo = item["Cupo"]
+                                    socio = session.query(Socio).filter(Socio.cupo == cupo).first()
+                                    if not socio:
+                                        nuevo_socio = Socio(cupo=cupo, nombre=f"Socio {cupo}", telefono="")
+                                        session.add(nuevo_socio)
+                                        session.flush()
+                                        creados += 1
+                                # Luego registrar todos los pagos
+                                todos_pagos = existentes + no_existentes
                                 for item in todos_pagos:
                                     nuevo_pago = Pago(
                                         cupo=item["Cupo"],
@@ -436,13 +429,10 @@ elif menu == "📜 Pagos":
                                     )
                                     session.add(nuevo_pago)
                                     registrados += 1
-                                
                                 session.commit()
                                 session.close()
                                 st.success(f"✅ Se registraron {registrados} pagos y se crearon {creados} socios nuevos.")
                                 st.rerun()
-                        
-                        # Limpiar session_state después de usar (opcional)
                 except Exception as e:
                     st.error(f"Error al leer el archivo: {str(e)}")
     
@@ -506,7 +496,7 @@ elif menu == "📜 Pagos":
         else:
             st.info("No hay pagos conciliados para enviar recibos.")
         
-        # --- COLUMNA PARA ARCHIVAR (CSV y PDF) ---
+        # --- COLUMNA PARA ARCHIVAR ---
         with col_acciones:
             st.write("")
             st.write("")
@@ -531,7 +521,7 @@ elif menu == "📜 Pagos":
                     use_container_width=True
                 )
         
-        # --- COLUMNA PARA BORRAR TODOS LOS PAGOS ---
+        # --- ELIMINAR TODOS ---
         with col_borrar:
             st.write("")
             st.write("")
