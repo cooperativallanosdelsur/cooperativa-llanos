@@ -8,7 +8,7 @@ import pandas as pd
 from datetime import datetime
 
 def generar_pdf_reporte_socios(df_reporte):
-    """Genera un PDF con el reporte de socios con estado de pagos (incluye total pagado, pendiente, estado)."""
+    """Genera un PDF con el reporte de socios con estado de pagos."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
@@ -232,7 +232,6 @@ def generar_pdf_historial_pagos(df_pagos):
     buffer.seek(0)
     return buffer
 
-# ========== NUEVA FUNCIÓN PARA LISTA DE SOCIOS EN PDF ==========
 def generar_pdf_lista_socios(df_socios):
     """Genera un PDF con la lista simple de socios (Cupo, Nombre, Teléfono)."""
     buffer = BytesIO()
@@ -248,7 +247,6 @@ def generar_pdf_lista_socios(df_socios):
     contenido.append(Paragraph(f"Total de socios: {len(df_socios)}", estilo_normal))
     contenido.append(Spacer(1, 1*cm))
     
-    # Preparar datos para la tabla
     data = [["Cupo", "Nombre", "Teléfono"]]
     for _, row in df_socios.iterrows():
         data.append([
@@ -258,6 +256,52 @@ def generar_pdf_lista_socios(df_socios):
         ])
     
     tabla = Table(data, colWidths=[3*cm, 6*cm, 4*cm])
+    tabla.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.darkblue),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,0), 10),
+        ('BOTTOMPADDING', (0,0), (-1,0), 6),
+        ('BACKGROUND', (0,1), (-1,-1), colors.beige),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ('FONTSIZE', (0,1), (-1,-1), 9),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ]))
+    contenido.append(tabla)
+    contenido.append(Spacer(1, 2*cm))
+    contenido.append(Paragraph("Cooperativa Mensajeros Llanos del Sur, R.L.", styles['Normal']))
+    
+    doc.build(contenido)
+    buffer.seek(0)
+    return buffer
+
+# ========== NUEVA FUNCIÓN PARA PDF DE PENDIENTES ==========
+def generar_pdf_pendientes(df_pendientes):
+    """Genera un PDF con la lista de pagos pendientes (no conciliados)."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+    styles = getSampleStyleSheet()
+    estilo_titulo = styles['Title']
+    estilo_normal = styles['Normal']
+    
+    contenido = []
+    contenido.append(Paragraph("LISTA DE PAGOS PENDIENTES (NO CONCILIADOS)", estilo_titulo))
+    contenido.append(Spacer(1, 0.5*cm))
+    contenido.append(Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}", estilo_normal))
+    contenido.append(Paragraph(f"Total pendientes: {len(df_pendientes)}", estilo_normal))
+    contenido.append(Spacer(1, 1*cm))
+    
+    data = [["Cupo", "Monto", "Referencia", "Fecha Reporte"]]
+    for _, row in df_pendientes.iterrows():
+        data.append([
+            row['Cupo'],
+            f"${row['Monto']:,.2f}",
+            row['Referencia'],
+            row['Fecha Reporte']
+        ])
+    
+    tabla = Table(data, colWidths=[3*cm, 3*cm, 3*cm, 5*cm])
     tabla.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.darkblue),
         ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
