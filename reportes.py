@@ -270,9 +270,7 @@ def generar_pdf_lista_socios(df_socios):
     buffer.seek(0)
     return buffer
 
-# ========== NUEVA FUNCIÓN PARA PDF DE PENDIENTES (CORREGIDA) ==========
 def generar_pdf_pendientes(df_pendientes):
-    """Genera un PDF con la lista de pagos pendientes (no conciliados)."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
