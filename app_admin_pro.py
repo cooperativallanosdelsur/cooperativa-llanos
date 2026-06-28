@@ -7,11 +7,12 @@ from conciliador import ejecutar_conciliacion
 import os
 import unicodedata
 
-# Importaciones desde reportes.py (incluyendo la nueva función)
+# ========== IMPORTACIONES CORREGIDAS ==========
+# El módulo es 'reportes' (sin 's' al final) y la función es 'generar_pdf_pendientes'
 from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo,
                       generar_pdf_historial_conciliaciones, generar_pdf_detalle_conciliacion,
                       generar_pdf_historial_pagos, generar_pdf_lista_socios,
-                      generar_pdf_pendientes)  # <--- NUEVA IMPORTACIÓN
+                      generar_pdf_pendientes)  # <--- CORREGIDO: 'generar' con 'ar'
 
 st.set_page_config(page_title="Llanos del Sur", page_icon="🚛", layout="wide")
 
@@ -87,12 +88,11 @@ if menu == "📊 Dashboard":
         st.dataframe(pagos_df.sort_values('fecha_reporte', ascending=False).head(10)[['cupo', 'monto', 'referencia', 'estatus']])
 
 # ==========================================
-# PÁGINA 2: CONCILIACIÓN (CON PDF DE PENDIENTES)
+# PÁGINA 2: CONCILIACIÓN
 # ==========================================
 elif menu == "📥 Conciliación":
     st.title("📥 Conciliación Bancaria")
     
-    # --- SECCIÓN 1: CARGA DE PAGOS DE SOCIOS ---
     with st.expander("📤 Cargar pagos de socios (CSV/Excel)", expanded=False):
         st.info("Sube aquí el archivo con los pagos reportados por los socios.\n\n"
                 "Este archivo debe tener las columnas: **Cupo**, **Monto**, **Referencia**.\n"
@@ -264,7 +264,6 @@ elif menu == "📥 Conciliación":
     
     st.divider()
     
-    # --- SECCIÓN 2: SUBIR ESTADO DE CUENTA Y CONCILIAR (CON TABLA DE PENDIENTES Y PDF) ---
     with st.expander("📥 Subir Estado de Cuenta del Banco", expanded=True):
         st.info("Sube el archivo del banco (CSV o Excel) con las columnas **Referencia** y **Monto**.\n\n"
                 "Luego haz clic en 'Ejecutar Conciliación' para cruzar los datos con los pagos registrados.\n\n"
@@ -281,13 +280,11 @@ elif menu == "📥 Conciliación":
             st.success(resultado["mensaje"])
             st.info(f"⏳ Pendientes: {resultado['total_pendientes_restantes']}")
             
-            # --- MOSTRAR LISTA DE PENDIENTES ---
             if resultado.get('pendientes'):
                 st.subheader("📋 Detalle de pagos pendientes (no conciliados)")
                 df_pendientes = pd.DataFrame(resultado['pendientes'])
                 st.dataframe(df_pendientes, use_container_width=True)
                 
-                # --- BOTONES DE DESCARGA ---
                 st.subheader("📥 Descargar lista de pendientes")
                 col_csv, col_pdf = st.columns(2)
                 
@@ -529,7 +526,6 @@ elif menu == "👥 Socios":
 elif menu == "📜 Pagos":
     st.title("📜 Historial de Pagos")
     
-    # --- CARGA MANUAL ---
     with st.expander("➕ Agregar Pago de Prueba (Solo para testing)"):
         st.info("⚠️ El sistema validará que el socio exista.")
         col1, col2, col3 = st.columns(3)
@@ -561,7 +557,6 @@ elif menu == "📜 Pagos":
             else:
                 st.error("Todos los campos son obligatorios.")
     
-    # --- CARGA MASIVA CON AUTORIZACIÓN (DESDE PAGOS) ---
     with st.expander("📤 Carga Masiva de Pagos (Sube un archivo CSV/Excel)"):
         st.info("**Nuevo flujo:**\n\n"
                 "1️⃣ Sube el archivo con columnas: **Cupo**, **Monto**, **Referencia**.\n"
@@ -735,7 +730,6 @@ elif menu == "📜 Pagos":
     
     st.divider()
     
-    # --- TABLA DE PAGOS ---
     col_filtro, col_acciones, col_borrar = st.columns([2, 1, 1])
     with col_filtro:
         filtro = st.selectbox("Filtrar por estatus", ["Todos", "Pendiente", "Conciliado"])
@@ -762,7 +756,6 @@ elif menu == "📜 Pagos":
         
         st.dataframe(df_filtrado, use_container_width=True)
         
-        # --- BOTÓN ENVIAR RECIBO ---
         st.subheader("📨 Enviar Recibo de Pago")
         conciliados = df_pagos[df_pagos['Estatus'] == 'Conciliado']
         if not conciliados.empty:
@@ -793,7 +786,6 @@ elif menu == "📜 Pagos":
         else:
             st.info("No hay pagos conciliados para enviar recibos.")
         
-        # --- COLUMNA PARA ARCHIVAR ---
         with col_acciones:
             st.write("")
             st.write("")
@@ -818,7 +810,6 @@ elif menu == "📜 Pagos":
                     use_container_width=True
                 )
         
-        # --- ELIMINAR TODOS ---
         with col_borrar:
             st.write("")
             st.write("")
@@ -842,7 +833,6 @@ elif menu == "📜 Pagos":
 else:
     st.title("📊 Reportes y Conciliaciones")
     
-    # --- SECCIÓN 1: HISTORIAL DE CONCILIACIONES ---
     st.header("📋 Historial de Conciliaciones")
     
     session = SessionLocal()
@@ -956,7 +946,6 @@ else:
     
     st.divider()
     
-    # --- SECCIÓN 2: REPORTE DE SOCIOS ---
     st.header("📄 Reporte de Socios - Estado de Pagos")
     
     session = SessionLocal()
