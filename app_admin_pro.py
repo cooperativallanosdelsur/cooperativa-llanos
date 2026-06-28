@@ -7,8 +7,9 @@ from conciliador import ejecutar_conciliacion
 import os
 import unicodedata
 
-# Importación de reportes (incluyendo la nueva función)
-from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo, 
+# ========== IMPORTACIONES CORREGIDAS ==========
+# El módulo es 'reportes' (sin 's' al final) y los nombres de funciones son correctos
+from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo,
                       generar_pdf_historial_conciliaciones, generar_pdf_detalle_conciliacion,
                       generar_pdf_historial_pagos, generar_pdf_lista_socios)
 
@@ -257,7 +258,6 @@ elif menu == "👥 Socios":
         session.close()
         
         if socios_db:
-            # Mostrar tabla
             df_socios = pd.DataFrame([{
                 "Cupo": s.cupo, 
                 "Nombre": s.nombre, 
@@ -266,11 +266,10 @@ elif menu == "👥 Socios":
             st.dataframe(df_socios, use_container_width=True)
             st.caption(f"Total: {len(socios_db)} socios registrados.")
             
-            # Botones de descarga: CSV y PDF (NUEVO)
+            # Botones de descarga: CSV y PDF
             st.divider()
             col_csv, col_pdf = st.columns(2)
             with col_csv:
-                # Descarga en CSV
                 csv_data = df_socios.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
                 st.download_button(
                     label="📥 Descargar Lista en CSV",
@@ -280,7 +279,6 @@ elif menu == "👥 Socios":
                     use_container_width=True
                 )
             with col_pdf:
-                # Descarga en PDF (NUEVA FUNCIONALIDAD)
                 if st.button("📥 Descargar Lista en PDF", use_container_width=True):
                     pdf_buffer = generar_pdf_lista_socios(df_socios)
                     st.download_button(
@@ -291,7 +289,7 @@ elif menu == "👥 Socios":
                         use_container_width=True
                     )
             
-            # Eliminar socio (mantenido)
+            # Eliminar socio
             st.divider()
             st.subheader("🗑️ Eliminar Socio")
             lista_cupos = [s.cupo for s in socios_db]
