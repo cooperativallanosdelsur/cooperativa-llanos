@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-from database import SessionLocal, Pago, Socio, Conciliacion, conciliacion_pago
+from database import SessionLocal, Pago, Socio, Conciliacion, conciliacion_pago, ConciliacionEliminada
 from conciliador import ejecutar_conciliacion
 import os
 import unicodedata
 import base64
+import json
 
 # Importaciones desde reportes.py
 from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo,
@@ -18,19 +19,10 @@ st.set_page_config(page_title="Llanos del Sur", page_icon="🚛", layout="wide")
 
 # ========== FUNCIÓN PARA MOSTRAR PDF EN NUEVA PESTAÑA ==========
 def mostrar_pdf_preview(pdf_buffer, key_sufijo=""):
-    """
-    Muestra un PDF en un enlace que abre una nueva pestaña.
-    pdf_buffer: BytesIO con el contenido del PDF.
-    key_sufijo: string para diferenciar múltiples visores.
-    """
     if pdf_buffer is None:
         return
-    
-    # Leer el buffer y codificar en base64
     pdf_bytes = pdf_buffer.getvalue()
     pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
-    
-    # Crear un enlace HTML con target="_blank"
     html_link = f'''
     <a href="data:application/pdf;base64,{pdf_base64}" target="_blank" 
        style="display: inline-block; 
@@ -318,7 +310,6 @@ elif menu == "📥 Conciliación":
                 st.subheader("📥 Descargar lista de pendientes")
                 col_csv, col_pdf = st.columns(2)
                 
-                # Preparar PDF una sola vez
                 pdf_buffer_pendientes = generar_pdf_pendientes(df_pendientes)
                 
                 with col_csv:
@@ -340,7 +331,6 @@ elif menu == "📥 Conciliación":
                         use_container_width=True
                     )
                 
-                # Vista previa (nueva pestaña)
                 st.subheader("📄 Vista previa del PDF")
                 mostrar_pdf_preview(pdf_buffer_pendientes, key_sufijo="pendientes")
                 
@@ -531,7 +521,6 @@ elif menu == "👥 Socios":
                     mime="application/pdf",
                     use_container_width=True
                 )
-                # Vista previa
                 st.subheader("📄 Vista previa del PDF")
                 mostrar_pdf_preview(pdf_buffer, key_sufijo="lista_socios")
             
@@ -559,7 +548,7 @@ elif menu == "👥 Socios":
             st.info("📭 No hay socios registrados aún.")
 
 # ==========================================
-# PÁGINA 4: PAGOS (CON VISTA PREVIA DE RECIBO)
+# PÁGINA 4: PAGOS
 # ==========================================
 elif menu == "📜 Pagos":
     st.title("📜 Historial de Pagos")
@@ -816,7 +805,6 @@ elif menu == "📜 Pagos":
                         file_name=f"recibo_{socio.cupo}_{pago.id}.pdf",
                         mime="application/pdf"
                     )
-                    # Vista previa
                     st.subheader("📄 Vista previa del Recibo")
                     mostrar_pdf_preview(pdf_recibo, key_sufijo="recibo")
                 
@@ -870,131 +858,199 @@ elif menu == "📜 Pagos":
         st.info("📭 No hay pagos registrados aún.")
 
 # ==========================================
-# PÁGINA 5: REPORTES
+# PÁGINA 5: REPORTES (CON PDF EN DETALLE Y ARCHIVO DE ELIMINADOS)
 # ==========================================
 else:
     st.title("📊 Reportes y Conciliaciones")
     
-    st.header("📋 Historial de Conciliaciones")
+    # --- SECCIÓN 1: HISTORIAL DE CONCILIACIONES ACTIVAS ---
+    st.header("📋 Historial de Conciliaciones Activas")
     
     session = SessionLocal()
     conciliaciones = session.query(Conciliacion).order_by(Conciliacion.fecha_hora.desc()).all()
     session.close()
     
     if conciliaciones:
-        data = []
+        # Mostrar cada conciliación con un expander
         for c in conciliaciones:
-            data.append({
+            with st.expander(f"🔹 Conciliación #{c.id} - {c.fecha_hora.strftime('%Y-%m-%d %H:%M')} (Total: {c.total_pagos} pagos, ${c.monto_total:,.2f})"):
+                # Obtener los pagos asociados a esta conciliación
+                session_local = SessionLocal()
+                pagos_conc = session_local.query(Pago).filter(Pago.conciliacion.any(id=c.id)).all()
+                session_local.close()
+                
+                if pagos_conc:
+                    df_detalle = pd.DataFrame([{
+                        "Cupo": p.cupo,
+                        "Monto": p.monto,
+                        "Referencia": p.referencia,
+                        "Fecha Reporte": p.fecha_reporte.strftime("%Y-%m-%d %H:%M")
+                    } for p in pagos_conc])
+                    st.dataframe(df_detalle, use_container_width=True)
+                    
+                    # Botones para descargar el detalle: CSV y PDF (NUEVO)
+                    st.subheader("📥 Descargar detalle de esta conciliación")
+                    col_csv_det, col_pdf_det = st.columns(2)
+                    with col_csv_det:
+                        csv_detalle = df_detalle.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                        st.download_button(
+                            label="📥 Descargar CSV",
+                            data=csv_detalle,
+                            file_name=f"detalle_conciliacion_{c.id}.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                    with col_pdf_det:
+                        # Generar PDF del detalle
+                        pdf_detalle_buffer = generar_pdf_detalle_conciliacion(c.id, df_detalle)
+                        st.download_button(
+                            label="📥 Descargar PDF",
+                            data=pdf_detalle_buffer,
+                            file_name=f"detalle_conciliacion_{c.id}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
+                        # Vista previa
+                        st.subheader("📄 Vista previa del Detalle")
+                        mostrar_pdf_preview(pdf_detalle_buffer, key_sufijo=f"detalle_{c.id}")
+                else:
+                    st.info("Esta conciliación no tiene pagos asociados (puede haber sido eliminada).")
+                
+                # Opción para eliminar esta conciliación (guardándola en archivo)
+                st.divider()
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    confirmar_elim = st.checkbox(f"⚠️ Marcar para archivar/eliminar conciliación #{c.id}", key=f"del_{c.id}")
+                    if st.button(f"🗑️ Archivar Conciliación #{c.id}", key=f"btn_del_{c.id}", type="primary"):
+                        if confirmar_elim:
+                            session_del = SessionLocal()
+                            conc = session_del.query(Conciliacion).get(c.id)
+                            if conc:
+                                # 1. Obtener los pagos para guardar el detalle en JSON
+                                pagos_conc_del = session_del.query(Pago).filter(Pago.conciliacion.any(id=c.id)).all()
+                                detalle_list = []
+                                for p in pagos_conc_del:
+                                    detalle_list.append({
+                                        "Cupo": p.cupo,
+                                        "Monto": p.monto,
+                                        "Referencia": p.referencia,
+                                        "Fecha Reporte": p.fecha_reporte.strftime("%Y-%m-%d %H:%M")
+                                    })
+                                detalle_json = json.dumps(detalle_list)
+                                
+                                # 2. Crear registro en la tabla de eliminados
+                                eliminado = ConciliacionEliminada(
+                                    conciliacion_id_original=c.id,
+                                    fecha_hora_original=c.fecha_hora,
+                                    total_pagos=c.total_pagos,
+                                    monto_total=c.monto_total,
+                                    detalle_pagos_json=detalle_json
+                                )
+                                session_del.add(eliminado)
+                                session_del.flush()
+                                
+                                # 3. Eliminar relaciones en tabla intermedia
+                                session_del.execute(conciliacion_pago.delete().where(conciliacion_pago.c.conciliacion_id == c.id))
+                                # 4. Eliminar el registro original
+                                session_del.delete(conc)
+                                session_del.commit()
+                                st.success(f"✅ Conciliación #{c.id} archivada correctamente. Ahora está disponible en 'Conciliaciones Archivadas'.")
+                                st.rerun()
+                            session_del.close()
+                        else:
+                            st.error("❌ Debes marcar la casilla de confirmación.")
+        
+        st.divider()
+        # Resumen general en tabla
+        st.subheader("📊 Resumen general de conciliaciones activas")
+        data_resumen = []
+        for c in conciliaciones:
+            data_resumen.append({
                 "ID": c.id,
                 "Fecha/Hora": c.fecha_hora.strftime("%Y-%m-%d %H:%M"),
                 "Total Pagos": c.total_pagos,
                 "Monto Total": c.monto_total,
                 "Conciliado con el banco": "✅ Sí" if c.total_pagos > 0 else "❌ No"
             })
-        df_conciliaciones = pd.DataFrame(data)
-        st.dataframe(df_conciliaciones, use_container_width=True)
+        df_resumen = pd.DataFrame(data_resumen)
+        st.dataframe(df_resumen, use_container_width=True)
         
-        st.subheader("📌 Acciones por Conciliación")
-        opciones = {f"{row['Fecha/Hora']} - {row['Total Pagos']} pagos - ${row['Monto Total']:,.2f}": row['ID'] for _, row in df_conciliaciones.iterrows()}
-        seleccion = st.selectbox("Selecciona una conciliación para gestionar:", list(opciones.keys()))
-        conciliacion_id = opciones[seleccion]
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("📄 Exportar Detalle (PDF)", key="export_detalle"):
-                session = SessionLocal()
-                conciliacion = session.query(Conciliacion).get(conciliacion_id)
-                pagos = conciliacion.pagos
-                if pagos:
-                    df_detalle = pd.DataFrame([{
-                        "Cupo": p.cupo,
-                        "Monto": p.monto,
-                        "Referencia": p.referencia,
-                        "Fecha Reporte": p.fecha_reporte.strftime("%Y-%m-%d %H:%M")
-                    } for p in pagos])
-                    session.close()
-                    if not df_detalle.empty:
-                        pdf_detalle = generar_pdf_detalle_conciliacion(conciliacion_id, df_detalle)
-                        st.download_button(
-                            label="📥 Descargar PDF",
-                            data=pdf_detalle,
-                            file_name=f"conciliacion_{conciliacion_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                            mime="application/pdf"
-                        )
-                        st.subheader("📄 Vista previa del Detalle")
-                        mostrar_pdf_preview(pdf_detalle, key_sufijo="detalle")
-                    else:
-                        st.warning("Esta conciliación no tiene pagos asociados.")
-                else:
-                    st.warning("Esta conciliación no tiene pagos asociados.")
-        
-        with col2:
-            if st.button("📄 Exportar Detalle (CSV)"):
-                session = SessionLocal()
-                conciliacion = session.query(Conciliacion).get(conciliacion_id)
-                pagos = conciliacion.pagos
-                if pagos:
-                    df_detalle = pd.DataFrame([{
-                        "Cupo": p.cupo,
-                        "Monto": p.monto,
-                        "Referencia": p.referencia,
-                        "Fecha Reporte": p.fecha_reporte.strftime("%Y-%m-%d %H:%M")
-                    } for p in pagos])
-                    session.close()
-                    if not df_detalle.empty:
-                        csv_detalle = df_detalle.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-                        st.download_button(
-                            label="📥 Descargar CSV",
-                            data=csv_detalle,
-                            file_name=f"conciliacion_{conciliacion_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv"
-                        )
-                    else:
-                        st.warning("Esta conciliación no tiene pagos asociados.")
-                else:
-                    st.warning("Esta conciliación no tiene pagos asociados.")
-        
-        with col3:
-            confirmar = st.checkbox("⚠️ Marcar para eliminar esta conciliación")
-            if st.button("🗑️ Eliminar Conciliación", type="primary"):
-                if confirmar:
-                    session = SessionLocal()
-                    conciliacion = session.query(Conciliacion).get(conciliacion_id)
-                    if conciliacion:
-                        session.execute(conciliacion_pago.delete().where(conciliacion_pago.c.conciliacion_id == conciliacion_id))
-                        session.delete(conciliacion)
-                        session.commit()
-                        st.success(f"✅ Conciliación #{conciliacion_id} eliminada.")
-                        st.rerun()
-                    session.close()
-                else:
-                    st.error("❌ Debes marcar la casilla de confirmación.")
-        
-        st.divider()
+        # Botones para descargar resumen completo
         col_csv, col_pdf = st.columns(2)
         with col_csv:
-            csv_hist = df_conciliaciones.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            csv_resumen = df_resumen.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
             st.download_button(
-                label="📥 Descargar Historial Completo (CSV)",
-                data=csv_hist,
-                file_name=f"historial_conciliaciones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                label="📥 Descargar Resumen (CSV)",
+                data=csv_resumen,
+                file_name=f"resumen_conciliaciones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
             )
         with col_pdf:
-            pdf_historial = generar_pdf_historial_conciliaciones(df_conciliaciones)
+            pdf_resumen = generar_pdf_historial_conciliaciones(df_resumen)
             st.download_button(
-                label="📥 Descargar PDF",
-                data=pdf_historial,
-                file_name=f"historial_conciliaciones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                label="📥 Descargar Resumen (PDF)",
+                data=pdf_resumen,
+                file_name=f"resumen_conciliaciones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                 mime="application/pdf"
             )
-            st.subheader("📄 Vista previa del Historial Completo")
-            mostrar_pdf_preview(pdf_historial, key_sufijo="historial_completo")
+            st.subheader("📄 Vista previa del Resumen")
+            mostrar_pdf_preview(pdf_resumen, key_sufijo="resumen")
+            
     else:
         st.info("Aún no se ha realizado ninguna conciliación.")
     
     st.divider()
     
+    # --- SECCIÓN 2: CONCILIACIONES ARCHIVADAS (ELIMINADAS) ---
+    st.header("🗑️ Conciliaciones Archivadas (Eliminadas)")
+    
+    session_arch = SessionLocal()
+    archivadas = session_arch.query(ConciliacionEliminada).order_by(ConciliacionEliminada.fecha_eliminacion.desc()).all()
+    session_arch.close()
+    
+    if archivadas:
+        st.info(f"Hay {len(archivadas)} conciliaciones archivadas. Estas se guardan para consulta histórica.")
+        
+        for arch in archivadas:
+            with st.expander(f"📂 Archivo #{arch.id} (Original #{arch.conciliacion_id_original}) - Eliminado: {arch.fecha_eliminacion.strftime('%Y-%m-%d %H:%M')} (Total: {arch.total_pagos} pagos, ${arch.monto_total:,.2f})"):
+                st.write(f"**Fecha original de la conciliación:** {arch.fecha_hora_original.strftime('%Y-%m-%d %H:%M')}")
+                st.write(f"**Fecha de eliminación:** {arch.fecha_eliminacion.strftime('%Y-%m-%d %H:%M')}")
+                
+                # Mostrar el detalle guardado en JSON
+                detalle = arch.get_detalle_pagos()
+                if detalle:
+                    df_arch_detalle = pd.DataFrame(detalle)
+                    st.dataframe(df_arch_detalle, use_container_width=True)
+                    
+                    # Opción para descargar el detalle archivado en CSV
+                    csv_arch = df_arch_detalle.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                    st.download_button(
+                        label="📥 Descargar detalle archivado (CSV)",
+                        data=csv_arch,
+                        file_name=f"archivo_conciliacion_{arch.id}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                    
+                    # También PDF del detalle archivado
+                    pdf_arch_buffer = generar_pdf_detalle_conciliacion(arch.conciliacion_id_original, df_arch_detalle)
+                    st.download_button(
+                        label="📥 Descargar detalle archivado (PDF)",
+                        data=pdf_arch_buffer,
+                        file_name=f"archivo_conciliacion_{arch.id}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                    st.subheader("📄 Vista previa del detalle archivado")
+                    mostrar_pdf_preview(pdf_arch_buffer, key_sufijo=f"arch_{arch.id}")
+                else:
+                    st.info("No se encontraron detalles para esta conciliación archivada.")
+    else:
+        st.info("No hay conciliaciones archivadas. Cuando elimines una conciliación, aparecerá aquí.")
+    
+    st.divider()
+    
+    # --- Reporte de Socios (sin cambios) ---
     st.header("📄 Reporte de Socios - Estado de Pagos")
     
     session = SessionLocal()
