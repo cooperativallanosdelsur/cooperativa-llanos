@@ -5,69 +5,41 @@ from datetime import datetime
 def ejecutar_conciliacion(ruta_archivo_bancos):
     session = SessionLocal()
     
-    # Cargar archivo (Excel o CSV)
+    # Cargar archivo
     if ruta_archivo_bancos.endswith('.csv'):
-        df = pd.read_csv(ruta_archivo_bancos, header=None)
+        df_bancos = pd.read_csv(ruta_archivo_bancos)
     else:
-        df = pd.read_excel(ruta_archivo_bancos, header=None)
-    
-    # Buscar la fila donde están los encabezados
-    header_row = None
-    for i, row in df.iterrows():
-        row_text = ' '.join(str(val) for val in row.values if pd.notna(val))
-        if 'referencia' in row_text.lower() and 'monto' in row_text.lower():
-            header_row = i
-            break
-    
-    if header_row is None:
-        raise ValueError("No se encontró la fila con 'Referencia' y 'Monto' en el archivo.")
-    
-    # Usar esa fila como encabezado y leer los datos desde la siguiente fila
-    df_clean = pd.read_excel(ruta_archivo_bancos, header=header_row) if not ruta_archivo_bancos.endswith('.csv') else pd.read_csv(ruta_archivo_bancos, header=header_row)
-    
-    # Limpiar columnas: eliminar espacios y normalizar nombres
-    df_clean.columns = df_clean.columns.str.strip().str.lower()
-    df_clean = df_clean.dropna(how='all')
-    
-    # Identificar las columnas correctas (pueden llamarse "referencia" o "monto")
-    ref_col = None
-    monto_col = None
-    for col in df_clean.columns:
-        if 'referencia' in col or 'ref' in col:
-            ref_col = col
-        if 'monto' in col or 'monto' in col or 'importe' in col:
-            monto_col = col
-    
-    if ref_col is None or monto_col is None:
-        raise ValueError("No se encontraron las columnas 'Referencia' y 'Monto'.")
+        df_bancos = pd.read_excel(ruta_archivo_bancos)
     
     # Limpiar datos
-    df_clean[ref_col] = df_clean[ref_col].astype(str).str.strip()
-    df_clean[monto_col] = df_clean[monto_col].astype(str).str.replace(',', '.').astype(float)
-    
-    # Eliminar filas que sean "Total" o tengan valores vacíos
-    df_clean = df_clean[~df_clean[ref_col].str.lower().str.contains('total', na=False)]
-    df_clean = df_clean[df_clean[ref_col] != '']
-    df_clean = df_clean[df_clean[ref_col].notna()]
+    df_bancos['Monto'] = df_bancos['Monto'].astype(float)
+    df_bancos['Referencia'] = df_bancos['Referencia'].astype(str).str.strip()
     
     # Buscar pagos pendientes
     pendientes = session.query(Pago).filter(Pago.estatus == 'Pendiente').all()
     pagos_conciliados = []
-    conciliados_hoy = 0
+    pagos_pendientes = []  # Lista para almacenar los pendientes con sus datos
     
     for pago in pendientes:
-        # Buscar coincidencia en el DataFrame
-        coincidencia = df_clean[
-            (df_clean[ref_col] == pago.referencia) & 
-            (df_clean[monto_col] == pago.monto)
+        coincidencia = df_bancos[
+            (df_bancos['Referencia'] == pago.referencia) & 
+            (df_bancos['Monto'] == pago.monto)
         ]
         if not coincidencia.empty:
             pago.estatus = 'Conciliado'
             pago.fecha_conciliacion = datetime.now()
             pagos_conciliados.append(pago)
-            conciliados_hoy += 1
+        else:
+            # Guardar información del pago pendiente
+            pagos_pendientes.append({
+                "Cupo": pago.cupo,
+                "Monto": pago.monto,
+                "Referencia": pago.referencia,
+                "Fecha Reporte": pago.fecha_reporte.strftime("%Y-%m-%d %H:%M")
+            })
     
-    # Si se concilió al menos un pago, crear un registro de conciliación
+    # Si se concilió al menos un pago, crear registro de conciliación
+    conciliados_hoy = len(pagos_conciliados)
     if conciliados_hoy > 0:
         nueva_conciliacion = Conciliacion(
             fecha_hora=datetime.now(),
@@ -76,7 +48,6 @@ def ejecutar_conciliacion(ruta_archivo_bancos):
         )
         session.add(nueva_conciliacion)
         session.flush()
-        
         for pago in pagos_conciliados:
             session.execute(
                 conciliacion_pago.insert().values(
@@ -86,10 +57,13 @@ def ejecutar_conciliacion(ruta_archivo_bancos):
             )
     
     session.commit()
+    
+    # Contar cuántos pendientes quedan después de la conciliación
     restantes = session.query(Pago).filter(Pago.estatus == 'Pendiente').count()
     session.close()
     
     return {
         "mensaje": f"✅ {conciliados_hoy} pagos conciliados automáticamente.",
-        "total_pendientes_restantes": restantes
+        "total_pendientes_restantes": restantes,
+        "pendientes": pagos_pendientes  # Ahora retorna la lista detallada
     }
