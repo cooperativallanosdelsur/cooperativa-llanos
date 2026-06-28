@@ -5,12 +5,12 @@ from datetime import datetime
 from database import SessionLocal, Pago, Socio, Conciliacion, conciliacion_pago
 from conciliador import ejecutar_conciliacion
 import os
-import io
+import unicodedata
 
-# Importación de reportes
+# Importación de reportes (incluyendo la nueva función)
 from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo, 
                       generar_pdf_historial_conciliaciones, generar_pdf_detalle_conciliacion,
-                      generar_pdf_historial_pagos)
+                      generar_pdf_historial_pagos, generar_pdf_lista_socios)
 
 st.set_page_config(page_title="Llanos del Sur", page_icon="🚛", layout="wide")
 
@@ -102,7 +102,7 @@ elif menu == "📥 Conciliación":
         os.remove(f"temp_{archivo.name}")
 
 # ==========================================
-# PÁGINA 3: SOCIOS (CON CARGA MASIVA CORREGIDA)
+# PÁGINA 3: SOCIOS (CON CARGA MASIVA Y DESCARGA PDF)
 # ==========================================
 elif menu == "👥 Socios":
     st.title("👥 Transportistas")
@@ -157,9 +157,7 @@ elif menu == "👥 Socios":
         
         if archivo_socios is not None and st.button("🚀 Cargar Socios Masivos", key="btn_socios"):
             try:
-                # Leer el archivo con detección de encoding
                 if archivo_socios.name.endswith('.csv'):
-                    # Intentar con UTF-8, luego con Latin-1
                     try:
                         df_socios = pd.read_csv(archivo_socios, encoding='utf-8-sig')
                     except:
@@ -167,18 +165,44 @@ elif menu == "👥 Socios":
                 else:
                     df_socios = pd.read_excel(archivo_socios)
                 
-                # Mostrar vista previa
                 st.subheader("📋 Vista previa del archivo")
-                st.dataframe(df_socios.head(5), use_container_width=True)
-                
-                # Limpiar nombres de columnas
-                df_socios.columns = df_socios.columns.str.strip().str.lower()
-                
-                # Verificar columnas requeridas
-                columnas_requeridas = ['cupo', 'nombre', 'telefono']
-                if not all(col in df_socios.columns for col in columnas_requeridas):
-                    st.error(f"El archivo debe contener las columnas: {', '.join(columnas_requeridas)} (sin importar mayúsculas).")
+                if len(df_socios) <= 20:
+                    st.dataframe(df_socios, use_container_width=True)
                 else:
+                    st.dataframe(df_socios.head(10), use_container_width=True)
+                    st.caption(f"Mostrando 10 de {len(df_socios)} filas.")
+                
+                # Normalizar nombres de columnas
+                def normalize_column_name(col):
+                    col = unicodedata.normalize('NFKD', col).encode('ascii', 'ignore').decode('utf-8')
+                    return col.strip().lower()
+                
+                df_socios.columns = [normalize_column_name(col) for col in df_socios.columns]
+                
+                col_cupo = None
+                col_nombre = None
+                col_telefono = None
+                for col in df_socios.columns:
+                    if 'cupo' in col:
+                        col_cupo = col
+                    elif 'nombre' in col or 'nomb' in col:
+                        col_nombre = col
+                    elif 'telef' in col or 'cel' in col:
+                        col_telefono = col
+                
+                if col_cupo is None or col_nombre is None:
+                    st.error("No se encontraron las columnas 'Cupo' y 'Nombre'. Verifica los encabezados.")
+                else:
+                    df_socios = df_socios.rename(columns={
+                        col_cupo: 'cupo',
+                        col_nombre: 'nombre',
+                        col_telefono: 'telefono'
+                    })
+                    
+                    if 'telefono' not in df_socios.columns:
+                        st.warning("No se encontró columna de teléfono. Se creará vacía.")
+                        df_socios['telefono'] = ''
+                    
                     session = SessionLocal()
                     registrados = 0
                     duplicados = 0
@@ -189,9 +213,8 @@ elif menu == "👥 Socios":
                         try:
                             cupo_val = str(row['cupo']).strip()
                             nombre_val = str(row['nombre']).strip()
-                            telefono_val = str(row['telefono']).strip()
+                            telefono_val = str(row['telefono']).strip() if pd.notna(row['telefono']) else ''
                             
-                            # Verificar si el cupo ya existe
                             existe = session.query(Socio).filter(Socio.cupo == cupo_val).first()
                             if existe:
                                 duplicados += 1
@@ -223,7 +246,6 @@ elif menu == "👥 Socios":
                         df_detalle = pd.DataFrame(detalles)
                         st.subheader("📋 Detalle de la carga")
                         st.dataframe(df_detalle, use_container_width=True)
-                    
                     st.rerun()
             except Exception as e:
                 st.error(f"Error al leer el archivo: {str(e)}")
@@ -235,6 +257,7 @@ elif menu == "👥 Socios":
         session.close()
         
         if socios_db:
+            # Mostrar tabla
             df_socios = pd.DataFrame([{
                 "Cupo": s.cupo, 
                 "Nombre": s.nombre, 
@@ -243,6 +266,32 @@ elif menu == "👥 Socios":
             st.dataframe(df_socios, use_container_width=True)
             st.caption(f"Total: {len(socios_db)} socios registrados.")
             
+            # Botones de descarga: CSV y PDF (NUEVO)
+            st.divider()
+            col_csv, col_pdf = st.columns(2)
+            with col_csv:
+                # Descarga en CSV
+                csv_data = df_socios.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                st.download_button(
+                    label="📥 Descargar Lista en CSV",
+                    data=csv_data,
+                    file_name=f"lista_socios_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            with col_pdf:
+                # Descarga en PDF (NUEVA FUNCIONALIDAD)
+                if st.button("📥 Descargar Lista en PDF", use_container_width=True):
+                    pdf_buffer = generar_pdf_lista_socios(df_socios)
+                    st.download_button(
+                        label="📥 Descargar PDF",
+                        data=pdf_buffer,
+                        file_name=f"lista_socios_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+            
+            # Eliminar socio (mantenido)
             st.divider()
             st.subheader("🗑️ Eliminar Socio")
             lista_cupos = [s.cupo for s in socios_db]
@@ -267,7 +316,7 @@ elif menu == "👥 Socios":
             st.info("📭 No hay socios registrados aún.")
 
 # ==========================================
-# PÁGINA 4: PAGOS (CON CARGA MASIVA Y AUTORIZACIÓN)
+# PÁGINA 4: PAGOS
 # ==========================================
 elif menu == "📜 Pagos":
     st.title("📜 Historial de Pagos")
@@ -325,12 +374,32 @@ elif menu == "📜 Pagos":
                     else:
                         df_masivo = pd.read_excel(archivo_masivo)
                     
-                    df_masivo.columns = df_masivo.columns.str.strip().str.lower()
-                    columnas_requeridas = ['cupo', 'monto', 'referencia']
-                    if not all(col in df_masivo.columns for col in columnas_requeridas):
-                        st.error(f"El archivo debe contener las columnas: {', '.join(columnas_requeridas)} (sin importar mayúsculas).")
+                    def normalize_column_name(col):
+                        col = unicodedata.normalize('NFKD', col).encode('ascii', 'ignore').decode('utf-8')
+                        return col.strip().lower()
+                    
+                    df_masivo.columns = [normalize_column_name(col) for col in df_masivo.columns]
+                    
+                    col_cupo = None
+                    col_monto = None
+                    col_ref = None
+                    for col in df_masivo.columns:
+                        if 'cupo' in col:
+                            col_cupo = col
+                        elif 'monto' in col or 'importe' in col:
+                            col_monto = col
+                        elif 'referencia' in col or 'ref' in col:
+                            col_ref = col
+                    
+                    if col_cupo is None or col_monto is None or col_ref is None:
+                        st.error("No se encontraron las columnas 'Cupo', 'Monto' y 'Referencia'. Verifica los encabezados.")
                     else:
-                        # Mostrar vista previa
+                        df_masivo = df_masivo.rename(columns={
+                            col_cupo: 'cupo',
+                            col_monto: 'monto',
+                            col_ref: 'referencia'
+                        })
+                        
                         st.subheader("📋 Vista previa del archivo")
                         st.dataframe(df_masivo.head(5), use_container_width=True)
                         
@@ -409,7 +478,6 @@ elif menu == "📜 Pagos":
                                 session = SessionLocal()
                                 registrados = 0
                                 creados = 0
-                                # Primero crear los socios faltantes
                                 for item in no_existentes:
                                     cupo = item["Cupo"]
                                     socio = session.query(Socio).filter(Socio.cupo == cupo).first()
@@ -418,7 +486,6 @@ elif menu == "📜 Pagos":
                                         session.add(nuevo_socio)
                                         session.flush()
                                         creados += 1
-                                # Luego registrar todos los pagos
                                 todos_pagos = existentes + no_existentes
                                 for item in todos_pagos:
                                     nuevo_pago = Pago(
