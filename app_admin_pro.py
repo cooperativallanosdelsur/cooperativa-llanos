@@ -7,7 +7,6 @@ from conciliador import ejecutar_conciliacion
 import os
 import unicodedata
 import base64
-from io import BytesIO
 
 # Importaciones desde reportes.py
 from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo,
@@ -17,45 +16,35 @@ from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo,
 
 st.set_page_config(page_title="Llanos del Sur", page_icon="🚛", layout="wide")
 
-# ========== FUNCIÓN PARA MOSTRAR PDF EN VISTA PREVIA (CORREGIDA) ==========
+# ========== FUNCIÓN PARA MOSTRAR PDF EN NUEVA PESTAÑA ==========
 def mostrar_pdf_preview(pdf_buffer, key_sufijo=""):
     """
-    Muestra un PDF en un iframe dentro de la app.
+    Muestra un PDF en un enlace que abre una nueva pestaña.
     pdf_buffer: BytesIO con el contenido del PDF.
-    key_sufijo: string para diferenciar múltiples visores en la misma página.
+    key_sufijo: string para diferenciar múltiples visores.
     """
     if pdf_buffer is None:
-        st.warning("No hay PDF para mostrar.")
         return
     
-    try:
-        # Asegurarse de que el buffer esté al inicio
-        pdf_buffer.seek(0)
-        pdf_bytes = pdf_buffer.getvalue()
-        
-        if len(pdf_bytes) == 0:
-            st.warning("El PDF está vacío.")
-            return
-        
-        # Codificar en base64
-        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
-        
-        # Crear un iframe con el PDF embebido
-        pdf_html = f'''
-        <iframe 
-            src="data:application/pdf;base64,{pdf_base64}" 
-            width="100%" 
-            height="600" 
-            style="border: 1px solid #ccc; border-radius: 5px;"
-        >
-            Tu navegador no soporta la visualización de PDFs.
-        </iframe>
-        '''
-        
-        # Mostrar usando componentes HTML
-        st.components.v1.html(pdf_html, height=620)
-    except Exception as e:
-        st.error(f"Error al mostrar el PDF: {str(e)}")
+    # Leer el buffer y codificar en base64
+    pdf_bytes = pdf_buffer.getvalue()
+    pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+    
+    # Crear un enlace HTML con target="_blank"
+    html_link = f'''
+    <a href="data:application/pdf;base64,{pdf_base64}" target="_blank" 
+       style="display: inline-block; 
+              background-color: #4CAF50; 
+              color: white; 
+              padding: 10px 20px; 
+              text-decoration: none; 
+              border-radius: 5px; 
+              font-weight: bold;">
+        📂 Abrir PDF en nueva pestaña
+    </a>
+    '''
+    st.markdown(html_link, unsafe_allow_html=True)
+    st.caption("⚠️ El PDF se abrirá en una nueva pestaña de tu navegador.")
 
 # --- AUTENTICACIÓN ---
 if "authenticated" not in st.session_state:
@@ -329,6 +318,9 @@ elif menu == "📥 Conciliación":
                 st.subheader("📥 Descargar lista de pendientes")
                 col_csv, col_pdf = st.columns(2)
                 
+                # Preparar PDF una sola vez
+                pdf_buffer_pendientes = generar_pdf_pendientes(df_pendientes)
+                
                 with col_csv:
                     csv_pendientes = df_pendientes.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
                     st.download_button(
@@ -340,26 +332,18 @@ elif menu == "📥 Conciliación":
                     )
                 
                 with col_pdf:
-                    # Botón para mostrar vista previa
-                    if st.button("👁️ Vista previa PDF", key="preview_pendientes"):
-                        pdf_buffer_pendientes = generar_pdf_pendientes(df_pendientes)
-                        st.session_state['pdf_pendientes'] = pdf_buffer_pendientes
-                    
-                    # Botón para descargar PDF
                     st.download_button(
                         label="📥 Descargar PDF",
-                        data=generar_pdf_pendientes(df_pendientes),
+                        data=pdf_buffer_pendientes,
                         file_name=f"pendientes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                         mime="application/pdf",
                         use_container_width=True
                     )
-                    
-                    # Mostrar vista previa si existe en session_state
-                    if 'pdf_pendientes' in st.session_state and st.session_state['pdf_pendientes'] is not None:
-                        st.subheader("📄 Vista previa del PDF")
-                        mostrar_pdf_preview(st.session_state['pdf_pendientes'], key_sufijo="pendientes")
-                        # Limpiar después de mostrar para evitar duplicados (opcional)
-                        # st.session_state['pdf_pendientes'] = None
+                
+                # Vista previa (nueva pestaña)
+                st.subheader("📄 Vista previa del PDF")
+                mostrar_pdf_preview(pdf_buffer_pendientes, key_sufijo="pendientes")
+                
             else:
                 st.success("🎉 ¡No hay pagos pendientes! Todos los pagos fueron conciliados.")
             
@@ -539,24 +523,17 @@ elif menu == "👥 Socios":
                     use_container_width=True
                 )
             with col_pdf:
-                # Botón para vista previa
-                if st.button("👁️ Vista previa PDF", key="preview_lista_socios"):
-                    pdf_buffer = generar_pdf_lista_socios(df_socios)
-                    st.session_state['pdf_lista_socios'] = pdf_buffer
-                
-                # Descarga directa
+                pdf_buffer = generar_pdf_lista_socios(df_socios)
                 st.download_button(
                     label="📥 Descargar PDF",
-                    data=generar_pdf_lista_socios(df_socios),
+                    data=pdf_buffer,
                     file_name=f"lista_socios_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                     mime="application/pdf",
                     use_container_width=True
                 )
-                
-                # Mostrar vista previa si existe
-                if 'pdf_lista_socios' in st.session_state and st.session_state['pdf_lista_socios'] is not None:
-                    st.subheader("📄 Vista previa del PDF")
-                    mostrar_pdf_preview(st.session_state['pdf_lista_socios'], key_sufijo="lista_socios")
+                # Vista previa
+                st.subheader("📄 Vista previa del PDF")
+                mostrar_pdf_preview(pdf_buffer, key_sufijo="lista_socios")
             
             st.divider()
             st.subheader("🗑️ Eliminar Socio")
@@ -832,23 +809,16 @@ elif menu == "📜 Pagos":
             if pago and socio:
                 col1, col2 = st.columns(2)
                 with col1:
-                    # Vista previa del recibo
-                    if st.button("👁️ Vista previa del Recibo", key="preview_recibo"):
-                        pdf_recibo = generar_pdf_recibo(pago, socio)
-                        st.session_state['pdf_recibo'] = pdf_recibo
-                    
-                    # Descarga directa
+                    pdf_recibo = generar_pdf_recibo(pago, socio)
                     st.download_button(
                         label="📥 Descargar Recibo PDF",
-                        data=generar_pdf_recibo(pago, socio),
+                        data=pdf_recibo,
                         file_name=f"recibo_{socio.cupo}_{pago.id}.pdf",
                         mime="application/pdf"
                     )
-                    
-                    # Mostrar vista previa si existe
-                    if 'pdf_recibo' in st.session_state and st.session_state['pdf_recibo'] is not None:
-                        st.subheader("📄 Vista previa del Recibo")
-                        mostrar_pdf_preview(st.session_state['pdf_recibo'], key_sufijo="recibo")
+                    # Vista previa
+                    st.subheader("📄 Vista previa del Recibo")
+                    mostrar_pdf_preview(pdf_recibo, key_sufijo="recibo")
                 
                 with col2:
                     if st.button("📨 Enviar por WhatsApp (simulado)"):
@@ -870,18 +840,17 @@ elif menu == "📜 Pagos":
             )
             
             if st.button("📄 Generar Historial PDF", key="gen_pdf_pagos"):
-                st.session_state['pdf_pagos_data'] = generar_pdf_historial_pagos(df_pagos)
-            
-            if 'pdf_pagos_data' in st.session_state:
+                pdf_historial = generar_pdf_historial_pagos(df_pagos)
+                st.session_state['pdf_pagos_data'] = pdf_historial
                 st.download_button(
                     label="📥 Descargar PDF",
-                    data=st.session_state['pdf_pagos_data'],
+                    data=pdf_historial,
                     file_name=f"historial_pagos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                     mime="application/pdf",
                     use_container_width=True
                 )
                 st.subheader("📄 Vista previa del Historial de Pagos")
-                mostrar_pdf_preview(st.session_state['pdf_pagos_data'], key_sufijo="historial_pagos")
+                mostrar_pdf_preview(pdf_historial, key_sufijo="historial_pagos")
         
         with col_borrar:
             st.write("")
@@ -932,8 +901,7 @@ else:
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            # Vista previa del detalle en PDF
-            if st.button("👁️ Vista previa Detalle (PDF)", key="preview_detalle"):
+            if st.button("📄 Exportar Detalle (PDF)", key="export_detalle"):
                 session = SessionLocal()
                 conciliacion = session.query(Conciliacion).get(conciliacion_id)
                 pagos = conciliacion.pagos
@@ -946,25 +914,19 @@ else:
                     } for p in pagos])
                     session.close()
                     if not df_detalle.empty:
-                        pdf_buffer = generar_pdf_detalle_conciliacion(conciliacion_id, df_detalle)
-                        st.session_state['pdf_detalle'] = pdf_buffer
+                        pdf_detalle = generar_pdf_detalle_conciliacion(conciliacion_id, df_detalle)
+                        st.download_button(
+                            label="📥 Descargar PDF",
+                            data=pdf_detalle,
+                            file_name=f"conciliacion_{conciliacion_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                            mime="application/pdf"
+                        )
+                        st.subheader("📄 Vista previa del Detalle")
+                        mostrar_pdf_preview(pdf_detalle, key_sufijo="detalle")
                     else:
                         st.warning("Esta conciliación no tiene pagos asociados.")
                 else:
                     st.warning("Esta conciliación no tiene pagos asociados.")
-            
-            # Descarga directa del detalle
-            st.download_button(
-                label="📄 Descargar Detalle (PDF)",
-                data=generar_pdf_detalle_conciliacion(conciliacion_id, pd.DataFrame()),
-                file_name=f"conciliacion_{conciliacion_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                mime="application/pdf"
-            )
-            
-            # Mostrar vista previa si existe
-            if 'pdf_detalle' in st.session_state and st.session_state['pdf_detalle'] is not None:
-                st.subheader("📄 Vista previa del Detalle")
-                mostrar_pdf_preview(st.session_state['pdf_detalle'], key_sufijo="detalle")
         
         with col2:
             if st.button("📄 Exportar Detalle (CSV)"):
@@ -1019,23 +981,15 @@ else:
                 mime="text/csv"
             )
         with col_pdf:
-            # Vista previa del historial completo
-            if st.button("👁️ Vista previa Historial Completo (PDF)", key="preview_historial_completo"):
-                pdf_buffer = generar_pdf_historial_conciliaciones(df_conciliaciones)
-                st.session_state['pdf_historial_completo'] = pdf_buffer
-            
-            # Descarga directa
+            pdf_historial = generar_pdf_historial_conciliaciones(df_conciliaciones)
             st.download_button(
                 label="📥 Descargar PDF",
-                data=generar_pdf_historial_conciliaciones(df_conciliaciones),
+                data=pdf_historial,
                 file_name=f"historial_conciliaciones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                 mime="application/pdf"
             )
-            
-            # Mostrar vista previa si existe
-            if 'pdf_historial_completo' in st.session_state and st.session_state['pdf_historial_completo'] is not None:
-                st.subheader("📄 Vista previa del Historial Completo")
-                mostrar_pdf_preview(st.session_state['pdf_historial_completo'], key_sufijo="historial_completo")
+            st.subheader("📄 Vista previa del Historial Completo")
+            mostrar_pdf_preview(pdf_historial, key_sufijo="historial_completo")
     else:
         st.info("Aún no se ha realizado ninguna conciliación.")
     
@@ -1077,22 +1031,14 @@ else:
                 mime="text/csv"
             )
         with col2:
-            # Vista previa del reporte de socios
-            if st.button("👁️ Vista previa Reporte (PDF)", key="preview_reporte_socios"):
-                pdf_buffer = generar_pdf_reporte_socios(df_reporte)
-                st.session_state['pdf_reporte_socios'] = pdf_buffer
-            
-            # Descarga directa
+            pdf_reporte = generar_pdf_reporte_socios(df_reporte)
             st.download_button(
                 label="📥 Descargar PDF",
-                data=generar_pdf_reporte_socios(df_reporte),
+                data=pdf_reporte,
                 file_name=f"reporte_socios_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                 mime="application/pdf"
             )
-            
-            # Mostrar vista previa si existe
-            if 'pdf_reporte_socios' in st.session_state and st.session_state['pdf_reporte_socios'] is not None:
-                st.subheader("📄 Vista previa del Reporte de Socios")
-                mostrar_pdf_preview(st.session_state['pdf_reporte_socios'], key_sufijo="reporte_socios")
+            st.subheader("📄 Vista previa del Reporte de Socios")
+            mostrar_pdf_preview(pdf_reporte, key_sufijo="reporte_socios")
     else:
         st.info("No hay socios registrados para generar el reporte.")
