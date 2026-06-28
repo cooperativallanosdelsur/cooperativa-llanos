@@ -39,7 +39,6 @@ class Conciliacion(Base):
     fecha_hora = Column(DateTime, default=datetime.now)
     total_pagos = Column(Integer, default=0)
     monto_total = Column(Float, default=0.0)
-    # Relación con los pagos conciliados en este evento
     pagos = relationship("Pago", secondary=conciliacion_pago, backref="conciliacion")
 
 # ========== NUEVA TABLA PARA CONCILIACIONES ELIMINADAS ==========
@@ -51,11 +50,9 @@ class ConciliacionEliminada(Base):
     total_pagos = Column(Integer, default=0)
     monto_total = Column(Float, default=0.0)
     fecha_eliminacion = Column(DateTime, default=datetime.now)
-    # Guardamos el detalle de los pagos en JSON
     detalle_pagos_json = Column(Text, nullable=False, default='[]')
 
     def get_detalle_pagos(self):
-        """Convierte el JSON guardado de vuelta a una lista de diccionarios."""
         try:
             return json.loads(self.detalle_pagos_json)
         except:
