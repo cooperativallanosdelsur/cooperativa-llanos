@@ -1,7 +1,8 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Table
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Table, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
+import json
 
 Base = declarative_base()
 engine = create_engine('sqlite:///cooperativa.db', echo=False)
@@ -41,5 +42,24 @@ class Conciliacion(Base):
     # Relación con los pagos conciliados en este evento
     pagos = relationship("Pago", secondary=conciliacion_pago, backref="conciliacion")
 
-# Crear todas las tablas (esto se ejecutará al iniciar la app)
+# ========== NUEVA TABLA PARA CONCILIACIONES ELIMINADAS ==========
+class ConciliacionEliminada(Base):
+    __tablename__ = 'conciliaciones_eliminadas'
+    id = Column(Integer, primary_key=True)
+    conciliacion_id_original = Column(Integer, nullable=False)
+    fecha_hora_original = Column(DateTime, nullable=False)
+    total_pagos = Column(Integer, default=0)
+    monto_total = Column(Float, default=0.0)
+    fecha_eliminacion = Column(DateTime, default=datetime.now)
+    # Guardamos el detalle de los pagos en JSON
+    detalle_pagos_json = Column(Text, nullable=False, default='[]')
+
+    def get_detalle_pagos(self):
+        """Convierte el JSON guardado de vuelta a una lista de diccionarios."""
+        try:
+            return json.loads(self.detalle_pagos_json)
+        except:
+            return []
+
+# Crear todas las tablas
 Base.metadata.create_all(engine)
