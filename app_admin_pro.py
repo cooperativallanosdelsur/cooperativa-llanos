@@ -7,8 +7,7 @@ from conciliador import ejecutar_conciliacion
 import os
 import unicodedata
 
-# ========== IMPORTACIONES CORREGIDAS ==========
-# El módulo es 'reportes' (sin 's' al final) y los nombres de funciones son correctos
+# Importaciones correctas
 from reportes import (generar_pdf_reporte_socios, generar_pdf_recibo,
                       generar_pdf_historial_conciliaciones, generar_pdf_detalle_conciliacion,
                       generar_pdf_historial_pagos, generar_pdf_lista_socios)
@@ -140,7 +139,6 @@ elif menu == "👥 Socios":
         st.info("El archivo debe tener las columnas: **Cupo**, **Nombre** y **Teléfono**.\n\n"
                 "⚠️ Los cupos duplicados serán omitidos para evitar errores.")
         
-        # Plantilla
         plantilla = pd.DataFrame({
             "Cupo": ["C-001", "C-002"],
             "Nombre": ["Ana López", "Carlos Ruiz"],
@@ -173,7 +171,6 @@ elif menu == "👥 Socios":
                     st.dataframe(df_socios.head(10), use_container_width=True)
                     st.caption(f"Mostrando 10 de {len(df_socios)} filas.")
                 
-                # Normalizar nombres de columnas
                 def normalize_column_name(col):
                     col = unicodedata.normalize('NFKD', col).encode('ascii', 'ignore').decode('utf-8')
                     return col.strip().lower()
@@ -266,7 +263,6 @@ elif menu == "👥 Socios":
             st.dataframe(df_socios, use_container_width=True)
             st.caption(f"Total: {len(socios_db)} socios registrados.")
             
-            # Botones de descarga: CSV y PDF
             st.divider()
             col_csv, col_pdf = st.columns(2)
             with col_csv:
@@ -289,7 +285,6 @@ elif menu == "👥 Socios":
                         use_container_width=True
                     )
             
-            # Eliminar socio
             st.divider()
             st.subheader("🗑️ Eliminar Socio")
             lista_cupos = [s.cupo for s in socios_db]
@@ -314,7 +309,7 @@ elif menu == "👥 Socios":
             st.info("📭 No hay socios registrados aún.")
 
 # ==========================================
-# PÁGINA 4: PAGOS
+# PÁGINA 4: PAGOS (CON CARGA MASIVA CORREGIDA CON SESSION_STATE)
 # ==========================================
 elif menu == "📜 Pagos":
     st.title("📜 Historial de Pagos")
@@ -351,7 +346,7 @@ elif menu == "📜 Pagos":
             else:
                 st.error("Todos los campos son obligatorios.")
     
-    # --- CARGA MASIVA CON AUTORIZACIÓN ---
+    # --- CARGA MASIVA CON AUTORIZACIÓN (CORREGIDA CON SESSION_STATE) ---
     with st.expander("📤 Carga Masiva de Pagos (Sube un archivo CSV/Excel)"):
         st.info("**Nuevo flujo:**\n\n"
                 "1️⃣ Sube el archivo con columnas: **Cupo**, **Monto**, **Referencia**.\n"
@@ -431,6 +426,11 @@ elif menu == "📜 Pagos":
                         
                         session.close()
                         
+                        # === GUARDAR EN SESSION_STATE PARA USAR LUEGO ===
+                        st.session_state['existentes'] = existentes
+                        st.session_state['no_existentes'] = no_existentes
+                        st.session_state['analisis_realizado'] = True
+                        
                         st.subheader("📊 Resumen del análisis")
                         st.info(f"Total de pagos en archivo: {len(df_masivo)}")
                         st.success(f"✅ Socios existentes: {len(existentes)}")
@@ -452,10 +452,10 @@ elif menu == "📜 Pagos":
                         
                         with col_btn1:
                             if st.button("📝 Registrar solo pagos de socios existentes", key="btn_existentes"):
-                                if existentes:
+                                if 'existentes' in st.session_state and st.session_state['existentes']:
                                     session = SessionLocal()
                                     registrados = 0
-                                    for item in existentes:
+                                    for item in st.session_state['existentes']:
                                         nuevo_pago = Pago(
                                             cupo=item["Cupo"],
                                             monto=item["Monto"],
@@ -467,6 +467,7 @@ elif menu == "📜 Pagos":
                                     session.commit()
                                     session.close()
                                     st.success(f"✅ Se registraron {registrados} pagos de socios existentes. (Los socios faltantes fueron omitidos)")
+                                    st.session_state['analisis_realizado'] = False  # limpiar
                                     st.rerun()
                                 else:
                                     st.info("No hay pagos de socios existentes para registrar.")
@@ -476,6 +477,11 @@ elif menu == "📜 Pagos":
                                 session = SessionLocal()
                                 registrados = 0
                                 creados = 0
+                                # Obtener datos de session_state
+                                no_existentes = st.session_state.get('no_existentes', [])
+                                existentes = st.session_state.get('existentes', [])
+                                
+                                # Crear socios faltantes
                                 for item in no_existentes:
                                     cupo = item["Cupo"]
                                     socio = session.query(Socio).filter(Socio.cupo == cupo).first()
@@ -484,6 +490,7 @@ elif menu == "📜 Pagos":
                                         session.add(nuevo_socio)
                                         session.flush()
                                         creados += 1
+                                # Registrar todos los pagos
                                 todos_pagos = existentes + no_existentes
                                 for item in todos_pagos:
                                     nuevo_pago = Pago(
@@ -497,6 +504,7 @@ elif menu == "📜 Pagos":
                                 session.commit()
                                 session.close()
                                 st.success(f"✅ Se registraron {registrados} pagos y se crearon {creados} socios nuevos.")
+                                st.session_state['analisis_realizado'] = False
                                 st.rerun()
                 except Exception as e:
                     st.error(f"Error al leer el archivo: {str(e)}")
